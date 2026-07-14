@@ -24,6 +24,11 @@ function validateQuiz(data, expectedCount) {
   return data;
 }
 
+function normalizeModel(value) {
+  const model = (value || 'gemini-2.5-flash-lite').trim();
+  return model.startsWith('emini-') ? `g${model}` : model;
+}
+
 async function callGemini({ apiKey, model, prompt, maxOutputTokens = 128, temperature = 0 }) {
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
     method: 'POST',
@@ -40,7 +45,7 @@ async function callGemini({ apiKey, model, prompt, maxOutputTokens = 128, temper
 
 export default async function handler(req, res) {
   const apiKey = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_QUIZ_MODEL || 'gemini-2.5-flash-lite';
+  const model = normalizeModel(process.env.GEMINI_QUIZ_MODEL);
 
   if (req.method === 'GET' && req.query?.health === '1') {
     if (!apiKey) return send(res, 503, { ok: false, configured: false, model, message: 'GEMINI_API_KEY가 없습니다.' });
