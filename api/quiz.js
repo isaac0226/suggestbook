@@ -47,6 +47,22 @@ export default async function handler(req, res) {
   const apiKey = process.env.GEMINI_API_KEY;
   const model = normalizeModel(process.env.GEMINI_QUIZ_MODEL);
 
+  if (req.method === 'GET' && req.query?.models === '1') {
+    if (!apiKey) return send(res, 503, { ok: false, configured: false, message: 'GEMINI_API_KEY가 없습니다.' });
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error?.message || '모델 목록 조회에 실패했습니다.');
+      const models = (result.models || [])
+        .filter((item) => item.supportedGenerationMethods?.includes('generateContent'))
+        .map((item) => item.name?.replace(/^models\//, ''))
+        .filter((name) => name?.includes('flash'));
+      return send(res, 200, { ok: true, models });
+    } catch (error) {
+      return send(res, 502, { ok: false, message: error.message });
+    }
+  }
+
   if (req.method === 'GET' && req.query?.health === '1') {
     if (!apiKey) return send(res, 503, { ok: false, configured: false, model, message: 'GEMINI_API_KEY가 없습니다.' });
     try {
