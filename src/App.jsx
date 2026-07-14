@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BookOpen, CheckCircle2, Circle, ExternalLink, RefreshCw, Search, Send, Sparkles } from 'lucide-react';
+import { BookOpen, CheckCircle2, Circle, Copy, ExternalLink, RefreshCw, Search, Send, Sparkles } from 'lucide-react';
 import { catalog, profiles } from './catalog';
 
 const STORAGE_KEY = 'suggestbook-state-v1';
@@ -84,6 +84,16 @@ export default function App() {
   const reshuffle = () => {
     setState((prev) => ({ ...prev, weekSalt: (prev.weekSalt || 0) + 1 }));
     setNotice('아직 읽지 않은 책 안에서 추천 순서를 바꿨어요.');
+    window.setTimeout(() => setNotice(''), 2200);
+  };
+
+  const copyBookTitle = async (book) => {
+    try {
+      await navigator.clipboard.writeText(book.title);
+      setNotice(`“${book.title}” 제목을 복사했어요.`);
+    } catch {
+      setNotice('제목 복사에 실패했어요. 제목을 길게 눌러 복사해 주세요.');
+    }
     window.setTimeout(() => setNotice(''), 2200);
   };
 
@@ -173,7 +183,10 @@ export default function App() {
               <div className="rank">{String(index + 1).padStart(2, '0')}</div>
               <div className="book-body">
                 <div className="tags">{book.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}</div>
-                <h3>{book.title}</h3>
+                <div className="title-row">
+                  <h3>{book.title}</h3>
+                  <button className="copy-title-button" onClick={() => copyBookTitle(book)} title="책 제목 복사" aria-label={`${book.title} 제목 복사`}><Copy size={17} /></button>
+                </div>
                 <p className="author">{book.author}</p>
                 <p className="reason">{book.reason}</p>
               </div>
