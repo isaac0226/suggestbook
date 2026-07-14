@@ -3,7 +3,13 @@ import { BookOpen, CheckCircle2, Circle, Copy, ExternalLink, RefreshCw, Search, 
 import { catalog, profiles } from './catalog';
 
 const STORAGE_KEY = 'suggestbook-state-v1';
-const SEGOK_SEARCH_URL = 'https://library.gangnam.go.kr/sklib/menu/11285/program/30001/plusSearchSimple.do';
+const LIBRARIES = {
+  segok: {
+    id: 'segok',
+    name: '세곡도서관',
+    searchUrl: 'https://library.gangnam.go.kr/sklib/menu/11285/program/30001/plusSearchSimple.do',
+  },
+};
 
 function getWeekKey(date = new Date()) {
   const copy = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -29,10 +35,16 @@ function getRecommendationCount(profile) {
 }
 
 function loadState() {
+  const fallback = {
+    read: {},
+    weekSalt: 0,
+    libraryId: 'segok',
+    customLibrary: { name: '', searchUrl: '' },
+  };
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { read: {}, weekSalt: 0 };
+    return { ...fallback, ...(JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}) };
   } catch {
-    return { read: {}, weekSalt: 0 };
+    return fallback;
   }
 }
 
@@ -46,6 +58,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
+
+  const selectedLibrary = state.libraryId === 'custom'
+    ? {
+        id: 'custom',
+        name: state.customLibrary?.name?.trim() || '선택한 도서관',
+        searchUrl: state.customLibrary?.searchUrl?.trim() || '',
+      }
+    : LIBRARIES[state.libraryId] || LIBRARIES.segok;
 
   const recommendations = useMemo(() => {
     const result = {};
@@ -66,14 +86,18 @@ export default function App() {
     return target.includes(query.trim().toLowerCase());
   });
 
+  const showNotice = (message, duration = 2200) => {
+    setNotice(message);
+    window.setTimeout(() => setNotice(''), duration);
+  };
+
   const toggleRead = (profileId, bookId) => {
     setState((prev) => {
       const current = new Set(prev.read[profileId] || []);
       current.add(bookId);
       return { ...prev, read: { ...prev.read, [profileId]: [...current] } };
     });
-    setNotice('읽은 책으로 저장했어요. 다음 추천부터 제외됩니다.');
-    window.setTimeout(() => setNotice(''), 2200);
+    showNotice('읽은 책으로 저장했어요. 다음 추천부터 제외됩니다.');
   };
 
   const restoreBook = (profileId, bookId) => {
@@ -88,40 +112,41 @@ export default function App() {
 
   const reshuffle = () => {
     setState((prev) => ({ ...prev, weekSalt: (prev.weekSalt || 0) + 1 }));
-    setNotice('아직 읽지 않은 책 안에서 추천 순서를 바꿨어요.');
-    window.setTimeout(() => setNotice(''), 2200);
+    showNotice('아직 읽지 않은 책 안에서 추천 순서를 바꿨어요.');
   };
 
   const copyBookTitle = async (book) => {
     try {
       await navigator.clipboard.writeText(book.title);
-      setNotice(`“${book.title}” 제목을 복사했어요.`);
+      showNotice(`“${book.title}” 제목을 복사했어요.`);
     } catch {
-      setNotice('제목 복사에 실패했어요. 제목을 길게 눌러 복사해 주세요.');
+      showNotice('제목 복사에 실패했어요. 제목을 길게 눌러 복사해 주세요.');
     }
-    window.setTimeout(() => setNotice(''), 2200);
   };
 
-  const openSegokSearch = async (book) => {
+  const openLibrarySearch = async (book) => {
     try {
       await navigator.clipboard.writeText(book.title);
-      setNotice(`“${book.title}” 제목을 복사했어요. 세곡도서관 검색창에 붙여넣어 주세요.`);
+      showNotice(`“${book.title}” 제목을 복사했어요. ${selectedLibrary.name} 검색창에 붙여넣어 주세요.`, 3500);
     } catch {
-      setNotice(`세곡도서관에서 “${book.title}”을 검색해 주세요.`);
+      showNotice(`${selectedLibrary.name}에서 “${book.title}”을 검색해 주세요.`, 3500);
     }
-    window.open(SEGOK_SEARCH_URL, '_blank', 'noopener,noreferrer');
-    window.setTimeout(() => setNotice(''), 3500);
+
+    if (!selectedLibrary.searchUrl) {
+      showNotice('도서관 자료검색 주소를 먼저 입력해 주세요.', 3000);
+      return;
+    }
+    window.open(selectedLibrary.searchUrl, '_blank', 'noopener,noreferrer');
   };
 
   const testTelegram = async () => {
     try {
       const response = await fetch('/api/telegram', { method: 'POST' });
       const data = await response.json();
-      setNotice(data.ok ? '텔레그램 테스트 알림을 보냈어요.' : (data.message || '환경변수 설정 후 사용할 수 있어요.'));
+      showNotice(data.ok ? '텔레그램 테스트 알림을 보냈어요.' : (data.message || '환경변수 설정 후 사용할 수 있어요.'), 3000);
     } catch {
-      setNotice('텔레그램 설정을 확인해 주세요.');
+      showNotice('텔레그램 설정을 확인해 주세요.', 3000);
     }
-    window.setTimeout(() => setNotice(''), 3000);
   };
 
   const readBooks = (state.read[activeProfile] || [])
@@ -149,11 +174,50 @@ export default function App() {
 
       <main>
         <section className="library-note">
-          <div>
-            <strong>주 이용 도서관: 세곡도서관</strong>
-            <span>각 추천도서에서 세곡도서관 소장·대출 여부를 바로 확인할 수 있어요.</span>
+          <div className="library-summary">
+            <strong>주 이용 도서관: {selectedLibrary.name}</strong>
+            <span>도서관을 바꾸면 모든 추천 카드의 확인 버튼도 함께 바뀝니다.</span>
           </div>
-          <a href={SEGOK_SEARCH_URL} target="_blank" rel="noreferrer">세곡도서관 자료검색 <ExternalLink size={15} /></a>
+          <div className="library-controls">
+            <label>
+              <span>도서관 선택</span>
+              <select
+                value={state.libraryId}
+                onChange={(event) => setState((prev) => ({ ...prev, libraryId: event.target.value }))}
+              >
+                <option value="segok">세곡도서관</option>
+                <option value="custom">다른 도서관 직접 설정</option>
+              </select>
+            </label>
+            {state.libraryId === 'custom' && (
+              <div className="custom-library-fields">
+                <input
+                  value={state.customLibrary?.name || ''}
+                  onChange={(event) => setState((prev) => ({
+                    ...prev,
+                    customLibrary: { ...prev.customLibrary, name: event.target.value },
+                  }))}
+                  placeholder="도서관 이름"
+                />
+                <input
+                  type="url"
+                  value={state.customLibrary?.searchUrl || ''}
+                  onChange={(event) => setState((prev) => ({
+                    ...prev,
+                    customLibrary: { ...prev.customLibrary, searchUrl: event.target.value },
+                  }))}
+                  placeholder="자료검색 페이지 주소 https://..."
+                />
+              </div>
+            )}
+            {selectedLibrary.searchUrl ? (
+              <a href={selectedLibrary.searchUrl} target="_blank" rel="noreferrer">
+                {selectedLibrary.name} 자료검색 <ExternalLink size={15} />
+              </a>
+            ) : (
+              <button className="disabled-library-link" disabled>자료검색 주소를 입력해 주세요</button>
+            )}
+          </div>
         </section>
 
         <section className="profile-tabs" aria-label="가족 선택">
@@ -196,7 +260,7 @@ export default function App() {
                 <p className="reason">{book.reason}</p>
               </div>
               <div className="book-actions">
-                <button className="library-button" onClick={() => openSegokSearch(book)}><ExternalLink size={18} /> 세곡도서관 확인</button>
+                <button className="library-button" onClick={() => openLibrarySearch(book)}><ExternalLink size={18} /> {selectedLibrary.name} 확인</button>
                 <button className="read-button" onClick={() => toggleRead(activeProfile, book.id)} title="읽은 책으로 표시"><Circle size={20} /> 읽었어요</button>
               </div>
             </article>
@@ -226,7 +290,7 @@ export default function App() {
 
       <footer>
         <strong>SuggestBook</strong>
-        <span>현재는 세곡도서관 검색페이지에서 소장 여부를 확인합니다. 추후 장서·인기대출 API를 연결하면 세곡도서관 보유 도서만 자동 추천하도록 확장할 수 있습니다.</span>
+        <span>선택한 도서관과 읽은 책 기록은 이 브라우저에 저장됩니다. 다른 기기에서는 도서관을 다시 선택해 주세요.</span>
       </footer>
     </div>
   );
