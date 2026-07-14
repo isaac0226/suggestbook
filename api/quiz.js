@@ -85,32 +85,31 @@ function scoreCandidate(candidate, title, identity) {
 }
 
 async function searchGoogleBooksQuery(query, title, identity) {
-  const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=20&printType=books`);
-  if (!response.ok) return [];
-  const result = await response.json();
-  return (result.items || []).map((item) => {
-    const info = item.volumeInfo || {};
-    const candidate = {
-      id: item.id || '',
-      title: info.title || title,
-      subtitle: info.subtitle || '',
-      authors: info.authors || [],
-      publisher: info.publisher || '',
-      publishedDate: info.publishedDate || '',
-      description: (info.description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000),
-      categories: info.categories || [],
-      isbn: (info.industryIdentifiers || []).find((entry) => entry.type === 'ISBN_13')?.identifier || '',
-    };
-    return { ...candidate, score: scoreCandidate(candidate, title, identity) };
-  });
+  try {
+    const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=20&printType=books`);
+    if (!response.ok) return [];
+    const result = await response.json();
+    return (result.items || []).map((item) => {
+      const info = item.volumeInfo || {};
+      const candidate = {
+        id: item.id || '',
+        title: info.title || title,
+        authors: info.authors || [],
+        publisher: info.publisher || '',
+        publishedDate: info.publishedDate || '',
+        description: (info.description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000),
+        categories: info.categories || [],
+        isbn: (info.industryIdentifiers || []).find((entry) => entry.type === 'ISBN_13')?.identifier || '',
+      };
+      return { ...candidate, score: scoreCandidate(candidate, title, identity) };
+    });
+  } catch {
+    return [];
+  }
 }
 
 async function searchGoogleBooks(title, identity) {
-  const queries = [
-    [title, identity].filter(Boolean).join(' '),
-    `intitle:${title}`,
-    title,
-  ];
+  const queries = [[title, identity].filter(Boolean).join(' '), `intitle:${title}`, title];
   const results = await Promise.all([...new Set(queries)].map((query) => searchGoogleBooksQuery(query, title, identity)));
   const unique = new Map();
   results.flat().forEach((candidate) => {
@@ -119,6 +118,28 @@ async function searchGoogleBooks(title, identity) {
     if (!previous || candidate.score > previous.score) unique.set(key, candidate);
   });
   return [...unique.values()].sort((a, b) => b.score - a.score)[0] || null;
+}
+
+async function searchOpenLibrary(title, identity) {
+  try {
+    const query = new URLSearchParams({ title, limit: '10', fields: 'key,title,author_name,publisher,first_publish_year,subject,isbn' });
+    const response = await fetch(`https://openlibrary.org/search.json?${query.toString()}`);
+    if (!response.ok) return null;
+    const result = await response.json();
+    const candidates = (result.docs || []).map((doc) => ({
+      title: doc.title || '',
+      authors: doc.author_name || [],
+      publisher: doc.publisher?.[0] || '',
+      publishedDate: doc.first_publish_year ? String(doc.first_publish_year) : '',
+      categories: (doc.subject || []).slice(0, 12),
+      isbn: doc.isbn?.[0] || '',
+      description: '',
+      score: scoreCandidate({ title: doc.title || '', authors: doc.author_name || [], publisher: doc.publisher?.[0] || '' }, title, identity),
+    }));
+    return candidates.sort((a, b) => b.score - a.score)[0] || null;
+  } catch {
+    return null;
+  }
 }
 
 async function identifyBookFromCover({ apiKey, model, coverImage, manualTitle, manualIdentity }) {
@@ -146,31 +167,23 @@ JSON만 출력하세요.
 
 async function resolveIdentifiedBook(identified) {
   const identity = identified.author || identified.publisher || '';
-  const match = await searchGoogleBooks(identified.title, identity);
-  const titleMatch = match ? similarity(identified.title, match.title) : 0;
-  if (!match || titleMatch < 0.72 || match.score < 0.58) {
-    return {
-      title: identified.title,
-      author: identified.author || identified.publisher || '저자 정보 없음',
-      publisher: identified.publisher || '',
-      description: '',
-      categories: [],
-      isbn: '',
-      confidence: identified.confidence || 0,
-      catalogMatched: false,
-    };
-  }
+  const [googleMatch, openLibraryMatch] = await Promise.all([
+    searchGoogleBooks(identified.title, identity),
+    searchOpenLibrary(identified.title, identity),
+  ]);
+  const candidates = [googleMatch, openLibraryMatch].filter(Boolean).filter((item) => similarity(identified.title, item.title) >= 0.72);
+  const match = candidates.sort((a, b) => b.score - a.score)[0] || null;
   return {
     title: identified.title,
-    catalogTitle: match.title,
-    author: identified.author || match.authors.join(', ') || identified.publisher || '저자 정보 없음',
-    publisher: identified.publisher || match.publisher || '',
-    description: match.description,
-    categories: match.categories,
-    isbn: match.isbn,
-    publishedDate: match.publishedDate,
-    confidence: Math.max(identified.confidence || 0, match.score),
-    catalogMatched: true,
+    catalogTitle: match?.title || '',
+    author: identified.author || match?.authors?.join(', ') || identified.publisher || '저자 정보 없음',
+    publisher: identified.publisher || match?.publisher || '',
+    description: match?.description || '',
+    categories: match?.categories || [],
+    isbn: match?.isbn || '',
+    publishedDate: match?.publishedDate || '',
+    confidence: Math.max(identified.confidence || 0, match?.score || 0),
+    catalogMatched: Boolean(match),
   };
 }
 
@@ -200,51 +213,40 @@ export default async function handler(req, res) {
   try {
     const coverImage = safeImages[0];
     const supportImages = safeImages.slice(1);
-    const identified = await identifyBookFromCover({
-      apiKey,
-      model,
-      coverImage,
-      manualTitle: title.trim(),
-      manualIdentity: author.trim(),
-    });
+    const identified = await identifyBookFromCover({ apiKey, model, coverImage, manualTitle: title.trim(), manualIdentity: author.trim() });
     const book = await resolveIdentifiedBook(identified);
-
-    const hasCatalogContent = Boolean(book.description && book.description.length >= 100);
+    const hasCatalogContent = Boolean(book.description && book.description.length >= 80);
     const hasSupportContent = supportImages.length > 0;
-    if (!hasCatalogContent && !hasSupportContent) {
-      return send(res, 422, {
-        message: `「${book.title}」 책은 확인했지만, 내용 문제를 만들 자료가 부족합니다. 뒷표지 책 소개, 목차 또는 본문 사진을 1장 이상 추가해 주세요.`,
-        matchedBook: book,
-      });
-    }
 
     const reference = [
-      `확인된 책 제목: ${book.title}`,
+      `정확히 식별한 책 제목: ${book.title}`,
       `저자: ${book.author}`,
       book.publisher ? `출판사: ${book.publisher}` : '',
       book.isbn ? `ISBN: ${book.isbn}` : '',
-      book.categories?.length ? `분류: ${book.categories.join(', ')}` : '',
-      hasCatalogContent ? `공개 도서 소개: ${book.description}` : '',
-      hasSupportContent ? `뒷표지·목차·본문 참고 사진: ${supportImages.length}장` : '',
+      book.categories?.length ? `도서 분류·주제어: ${book.categories.join(', ')}` : '',
+      hasCatalogContent ? `공개 도서 소개: ${book.description}` : '공개 도서 소개 전문은 확보하지 못함',
+      hasSupportContent ? `사용자가 제공한 뒷표지·목차·본문 사진: ${supportImages.length}장` : '추가 내용 사진 없음',
     ].filter(Boolean).join('\n');
 
-    const prompt = `당신은 한국 초등학생을 위한 정확한 독서퀴즈 출제자입니다.
+    const prompt = `당신은 한국 초등학생용 독서퀴즈 출제자입니다.
 ${reference}
 대상: ${grade}
 문제 수: ${questionCount}
 
-절대 규칙:
-1. 앞표지는 책 식별에만 사용했습니다. 앞표지 그림, 표지 문구, 제목, 저자, 출판사, 권수를 정답으로 묻는 문제는 절대 만들지 마세요.
-2. 반드시 책의 실제 내용, 개념, 사건, 인물의 행동, 원인과 결과, 핵심 메시지를 묻는 문제만 만드세요.
-3. 첨부된 참고 사진이 있다면 그 사진에 보이는 뒷표지 소개·목차·본문을 최우선 근거로 사용하세요.
-4. 공개 도서 소개에 없는 세부 내용이나 사진에서 읽히지 않는 내용을 추측하지 마세요.
-5. 같은 시리즈의 다른 권이나 비슷한 제목의 다른 책 내용을 섞지 마세요.
-6. “이 책의 제목은?”, “저자는 누구인가?”, “표지에 무엇이 보이는가?”, “표지에는 어떤 문구가 있는가?” 같은 문제는 금지입니다.
-7. 근거가 부족해 ${questionCount}개의 내용 문제를 만들 수 없다면 JSON의 error에 “책은 확인했지만 내용 문제를 만들 자료가 부족합니다. 뒷표지, 목차 또는 본문 사진을 추가해 주세요.”라고 적으세요.
-8. 선택지는 정확히 4개이며 정답은 0부터 3까지의 배열 인덱스입니다.
-9. 초등학생이 이해할 수 있는 자연스러운 한국어를 사용하세요.
-10. explanation에는 어떤 공개 소개나 참고 사진 내용에 근거했는지 간단히 설명하세요.
-11. skill은 12자 이내로 쓰세요. 예: 핵심 개념, 원인과 결과, 내용 이해, 인물 이해.
+작업 순서:
+1. 먼저 위 제목·저자·출판사로 정확히 어떤 책인지 식별하세요.
+2. 공개 도서 소개, 주제어, 사용자가 제공한 참고 사진, 그리고 당신이 이 정확한 책에 대해 확실히 알고 있는 내용만 종합하세요.
+3. 앞표지는 책 식별에만 사용했으므로 앞표지 자체를 문제 근거로 사용하지 마세요.
+4. 책의 실제 내용·개념·사건·인물 행동·원인과 결과·핵심 메시지를 묻는 문제만 만드세요.
+5. “제목은 무엇인가”, “저자는 누구인가”, “표지에 무엇이 보이는가”, “표지 문구는 무엇인가”, “출판사는 어디인가”는 절대 출제하지 마세요.
+6. 같은 시리즈의 다른 권이나 제목이 비슷한 다른 책 내용을 섞지 마세요.
+7. 확실하지 않은 인물명, 사건, 숫자, 대사, 세부 장면을 지어내지 마세요.
+8. 참고 사진이 있으면 그 사진의 실제 내용을 최우선 근거로 사용하세요.
+9. 정확한 내용 문제를 ${questionCount}개 만들 자신이 없을 때만 JSON의 error에 “책은 확인했지만 정확한 내용 문제를 만들 자료가 부족합니다. 뒷표지, 목차 또는 본문 사진을 추가해 주세요.”라고 적으세요.
+10. 단순히 공개 소개 전문이 없다는 이유만으로 바로 거절하지 말고, 정확히 알고 있는 책이라면 실제 내용에 근거해 출제하세요.
+11. 선택지는 정확히 4개이며 정답은 0부터 3까지의 배열 인덱스입니다.
+12. explanation은 정답이 되는 이유를 책 내용에 근거해 한두 문장으로 설명하세요.
+13. skill은 12자 이내로 쓰세요. 예: 핵심 개념, 원인과 결과, 내용 이해, 인물 이해.
 
 반드시 JSON만 출력하세요.
 {"title":"확인된 책 제목","author":"확인된 저자","questions":[{"question":"책 내용에 관한 문제","options":["선택지1","선택지2","선택지3","선택지4"],"answer":0,"hint":"정답을 직접 밝히지 않는 힌트","skill":"확인 능력","explanation":"정답 근거"}]}`;
@@ -255,7 +257,7 @@ ${reference}
       prompt,
       images: supportImages,
       maxOutputTokens: questionCount === 10 ? 4800 : questionCount === 5 ? 2700 : 1800,
-      temperature: 0.1,
+      temperature: 0.08,
     });
     const text = result?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
     const parsed = extractJson(text);
@@ -269,14 +271,14 @@ ${reference}
       matchedBook: book,
       model,
       usedPhotos: safeImages.length,
-      sourceMode: hasSupportContent ? 'catalog_and_support_photos' : 'catalog_description',
+      contentSource: hasSupportContent ? 'support_photos' : hasCatalogContent ? 'catalog' : 'known_book',
     });
   } catch (error) {
     console.error('quiz generation error', error);
     const message = error.message || '퀴즈 생성 중 오류가 발생했습니다.';
     if (/high demand|overloaded|temporarily unavailable/i.test(message)) return send(res, 503, { message: '지금 퀴즈 요청이 많아 잠시 혼잡합니다. 잠시 후 다시 시도해 주세요.' });
     if (/quota exceeded|rate limit|resource_exhausted/i.test(message)) return send(res, 429, { message: '잠시 동안 퀴즈 요청이 많았습니다. 10초 정도 후 다시 시도해 주세요.' });
-    if (/문제 수가 올바르지 않습니다/.test(message)) return send(res, 422, { message: '내용 문제 형식이 정확히 만들어지지 않았습니다. 같은 자료로 다시 한 번 시도해 주세요.' });
+    if (/문제 수가 올바르지 않습니다/.test(message)) return send(res, 422, { message: '문제 형식이 정확히 만들어지지 않았습니다. 같은 내용으로 다시 한 번 시도해 주세요.' });
     return send(res, 500, { message });
   }
 }
