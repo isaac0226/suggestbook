@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BookOpen, CheckCircle2, Circle, RefreshCw, Search, Send, Sparkles } from 'lucide-react';
+import { BookOpen, CheckCircle2, Circle, ExternalLink, RefreshCw, Search, Send, Sparkles } from 'lucide-react';
 import { catalog, profiles } from './catalog';
 
 const STORAGE_KEY = 'suggestbook-state-v1';
+const SEGOK_SEARCH_URL = 'https://library.gangnam.go.kr/sklib/menu/11285/program/30001/plusSearchSimple.do';
 
 function getWeekKey(date = new Date()) {
   const copy = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -86,6 +87,17 @@ export default function App() {
     window.setTimeout(() => setNotice(''), 2200);
   };
 
+  const openSegokSearch = async (book) => {
+    try {
+      await navigator.clipboard.writeText(book.title);
+      setNotice(`“${book.title}” 제목을 복사했어요. 세곡도서관 검색창에 붙여넣어 주세요.`);
+    } catch {
+      setNotice(`세곡도서관에서 “${book.title}”을 검색해 주세요.`);
+    }
+    window.open(SEGOK_SEARCH_URL, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => setNotice(''), 3500);
+  };
+
   const testTelegram = async () => {
     try {
       const response = await fetch('/api/telegram', { method: 'POST' });
@@ -121,6 +133,14 @@ export default function App() {
       </header>
 
       <main>
+        <section className="library-note">
+          <div>
+            <strong>주 이용 도서관: 세곡도서관</strong>
+            <span>각 추천도서에서 세곡도서관 소장·대출 여부를 바로 확인할 수 있어요.</span>
+          </div>
+          <a href={SEGOK_SEARCH_URL} target="_blank" rel="noreferrer">세곡도서관 자료검색 <ExternalLink size={15} /></a>
+        </section>
+
         <section className="profile-tabs" aria-label="가족 선택">
           {profiles.map((item) => {
             const unreadCount = recommendations[item.id]?.length || 0;
@@ -157,9 +177,10 @@ export default function App() {
                 <p className="author">{book.author}</p>
                 <p className="reason">{book.reason}</p>
               </div>
-              <button className="read-button" onClick={() => toggleRead(activeProfile, book.id)} title="읽은 책으로 표시">
-                <Circle size={22} /> 읽었어요
-              </button>
+              <div className="book-actions">
+                <button className="library-button" onClick={() => openSegokSearch(book)}><ExternalLink size={18} /> 세곡도서관 확인</button>
+                <button className="read-button" onClick={() => toggleRead(activeProfile, book.id)} title="읽은 책으로 표시"><Circle size={20} /> 읽었어요</button>
+              </div>
             </article>
           ))}
         </section>
@@ -187,7 +208,7 @@ export default function App() {
 
       <footer>
         <strong>SuggestBook</strong>
-        <span>현재 독서 기록은 이 기기의 브라우저에 저장됩니다. 추후 인기대출 API와 공용 저장소를 연결할 수 있도록 구성했습니다.</span>
+        <span>현재는 세곡도서관 검색페이지에서 소장 여부를 확인합니다. 추후 장서·인기대출 API를 연결하면 세곡도서관 보유 도서만 자동 추천하도록 확장할 수 있습니다.</span>
       </footer>
     </div>
   );
