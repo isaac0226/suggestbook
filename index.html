@@ -10,5 +10,70 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      (() => {
+        const libraryUrls = {
+          '세곡도서관': 'https://library.gangnam.go.kr/sklib/menu/11285/program/30001/plusSearchSimple.do',
+          '도곡정보문화도서관': 'https://library.gangnam.go.kr/dogoklib/index.do',
+          '개포하늘꿈도서관': 'https://library.gangnam.go.kr/hnkklib/index.do',
+          '논현도서관': 'https://library.gangnam.go.kr/nhlib/index.do',
+          '논현문화마루도서관': 'https://library.gangnam.go.kr/nmmlib/index.do',
+          '대치1작은도서관': 'https://library.gangnam.go.kr/dch1lib/index.do',
+          '대치도서관': 'https://library.gangnam.go.kr/dchlib/index.do',
+          '못골도서관': 'https://library.gangnam.go.kr/mglib/index.do',
+          '못골한옥어린이도서관': 'https://library.gangnam.go.kr/hchildlib/index.do',
+          '삼성도서관': 'https://library.gangnam.go.kr/sslib/index.do',
+          '세곡마루도서관': 'https://library.gangnam.go.kr/segokmarulib/index.do',
+          '역삼2작은도서관': 'https://library.gangnam.go.kr/ys2lib/index.do',
+          '역삼도서관': 'https://library.gangnam.go.kr/yslib/index.do',
+          '역삼푸른솔도서관': 'https://library.gangnam.go.kr/ysplib/index.do',
+          '열린도서관': 'https://library.gangnam.go.kr/yllib/index.do',
+          '일원라온영어도서관': 'https://library.gangnam.go.kr/englib/index.do',
+          '정다운도서관': 'https://library.gangnam.go.kr/jdwlib/index.do',
+          '즐거운도서관': 'https://library.gangnam.go.kr/jgwlib/menu/10827/program/30001/plusSearchSimple.do',
+          '청담도서관': 'https://library.gangnam.go.kr/cdlib/index.do',
+          '행복한도서관': 'https://library.gangnam.go.kr/happylib/index.do'
+        };
+
+        const selectedLibrary = () => {
+          const select = document.querySelector('.library-controls select');
+          return select?.options?.[select.selectedIndex]?.text?.trim() || '세곡도서관';
+        };
+
+        const syncMainLink = () => {
+          const name = selectedLibrary();
+          const link = document.querySelector('.library-controls a');
+          if (link && libraryUrls[name]) link.href = libraryUrls[name];
+        };
+
+        document.addEventListener('change', (event) => {
+          if (event.target.matches('.library-controls select')) setTimeout(syncMainLink, 0);
+        });
+
+        document.addEventListener('click', async (event) => {
+          const button = event.target.closest('.library-button');
+          const mainLink = event.target.closest('.library-controls a');
+          if (!button && !mainLink) return;
+
+          const name = selectedLibrary();
+          const url = libraryUrls[name];
+          if (!url) return;
+
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+
+          if (button) {
+            const title = button.closest('.book-card')?.querySelector('h3')?.textContent?.trim();
+            if (title && navigator.clipboard) {
+              try { await navigator.clipboard.writeText(title); } catch (_) {}
+            }
+          }
+          window.open(url, '_blank', 'noopener,noreferrer');
+        }, true);
+
+        new MutationObserver(syncMainLink).observe(document.documentElement, { childList: true, subtree: true });
+      })();
+    </script>
   </body>
 </html>
