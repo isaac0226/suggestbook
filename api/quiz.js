@@ -25,8 +25,10 @@ function validateQuiz(data, expectedCount) {
 }
 
 function normalizeModel(value) {
-  const model = (value || 'gemini-2.5-flash-lite').trim();
-  return model.startsWith('emini-') ? `g${model}` : model;
+  let model = (value || 'gemini-3.1-flash-lite').trim();
+  if (model.startsWith('emini-')) model = `g${model}`;
+  if (model === 'gemini-2.5-flash-lite') model = 'gemini-3.1-flash-lite';
+  return model;
 }
 
 async function callGemini({ apiKey, model, prompt, maxOutputTokens = 128, temperature = 0 }) {
