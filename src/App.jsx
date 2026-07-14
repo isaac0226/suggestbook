@@ -3,15 +3,36 @@ import { BookOpen, CheckCircle2, Circle, Copy, ExternalLink, RefreshCw, Search, 
 import { catalog, profiles } from './catalog';
 
 const STORAGE_KEY = 'suggestbook-state-v1';
-const GANGNAM_SEARCH_URL = 'https://library.gangnam.go.kr/sklib/menu/11285/program/30001/plusSearchSimple.do';
+const INTEGRATED_SEARCH_URL = 'https://library.gangnam.go.kr/intro/menu/10003/program/30001/plusSearchSimple.do';
 
 const LIBRARIES = [
-  '세곡도서관', '도곡정보문화도서관', '개포하늘꿈도서관', '논현도서관', '논현문화마루도서관',
-  '논현문화마루도서관(별관)', '대치1작은도서관', '대치도서관', '못골도서관', '못골한옥어린이도서관',
-  '삼성도서관', '세곡마루도서관', '역삼2작은도서관', '역삼도서관', '역삼푸른솔도서관',
-  '열린도서관', '일원라온영어도서관', '정다운도서관', '즐거운도서관', '청담도서관',
-  '행복한도서관', '개포4동주민도서관', '도곡2동주민도서관', '신사동주민도서관', '압구정동주민도서관',
-  '일원본동주민도서관', '개포1동주민도서관'
+  { name: '세곡도서관', url: 'https://library.gangnam.go.kr/sklib/menu/11285/program/30001/plusSearchSimple.do' },
+  { name: '도곡정보문화도서관', url: 'https://library.gangnam.go.kr/dogoklib/menu/10085/program/30001/plusSearchSimple.do' },
+  { name: '개포하늘꿈도서관', url: 'https://library.gangnam.go.kr/hnkklib/menu/13166/program/30001/plusSearchSimple.do' },
+  { name: '논현도서관', url: 'https://library.gangnam.go.kr/nhlib/menu/10186/program/30001/plusSearchSimple.do' },
+  { name: '논현문화마루도서관', url: 'https://library.gangnam.go.kr/nmmlib/menu/13426/program/30001/plusSearchSimple.do' },
+  { name: '논현문화마루도서관(별관)', url: INTEGRATED_SEARCH_URL, integrated: true },
+  { name: '대치1작은도서관', url: 'https://library.gangnam.go.kr/dch1lib/menu/11137/program/30001/plusSearchSimple.do' },
+  { name: '대치도서관', url: 'https://library.gangnam.go.kr/dchlib/menu/10265/program/30001/plusSearchSimple.do' },
+  { name: '못골도서관', url: 'https://library.gangnam.go.kr/mglib/menu/10346/program/30001/plusSearchSimple.do' },
+  { name: '못골한옥어린이도서관', url: 'https://library.gangnam.go.kr/hchildlib/menu/10428/program/30001/plusSearchSimple.do' },
+  { name: '삼성도서관', url: 'https://library.gangnam.go.kr/sslib/menu/11211/program/30001/plusSearchSimple.do' },
+  { name: '세곡마루도서관', url: 'https://library.gangnam.go.kr/segokmarulib/menu/11487/program/30001/plusSearchSimple.do' },
+  { name: '역삼2동작은도서관', url: 'https://library.gangnam.go.kr/ys2lib/menu/11358/program/30001/plusSearchSimple.do' },
+  { name: '역삼도서관', url: 'https://library.gangnam.go.kr/yslib/menu/10512/program/30001/plusSearchSimple.do' },
+  { name: '역삼푸른솔도서관', url: 'https://library.gangnam.go.kr/ysplib/menu/10591/program/30001/plusSearchSimple.do' },
+  { name: '열린도서관', url: 'https://library.gangnam.go.kr/yllib/menu/10670/program/30001/plusSearchSimple.do' },
+  { name: '일원라온영어도서관', url: 'https://library.gangnam.go.kr/englib/menu/11580/program/30001/plusSearchSimple.do' },
+  { name: '정다운도서관', url: 'https://library.gangnam.go.kr/jdwlib/menu/10748/program/30001/plusSearchSimple.do' },
+  { name: '즐거운도서관', url: 'https://library.gangnam.go.kr/jgwlib/menu/10827/program/30001/plusSearchSimple.do' },
+  { name: '청담도서관', url: 'https://library.gangnam.go.kr/cdlib/menu/10906/program/30001/plusSearchSimple.do' },
+  { name: '행복한도서관', url: 'https://library.gangnam.go.kr/happylib/menu/10985/program/30001/plusSearchSimple.do' },
+  { name: '개포4동주민도서관', url: INTEGRATED_SEARCH_URL, integrated: true },
+  { name: '도곡2동주민도서관', url: INTEGRATED_SEARCH_URL, integrated: true },
+  { name: '신사동주민도서관', url: INTEGRATED_SEARCH_URL, integrated: true },
+  { name: '압구정동주민도서관', url: INTEGRATED_SEARCH_URL, integrated: true },
+  { name: '일원본동주민도서관', url: INTEGRATED_SEARCH_URL, integrated: true },
+  { name: '개포1동주민도서관', url: INTEGRATED_SEARCH_URL, integrated: true },
 ];
 
 function getWeekKey(date = new Date()) {
@@ -59,7 +80,7 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
-  const selectedLibrary = state.library || '세곡도서관';
+  const selectedLibrary = LIBRARIES.find((library) => library.name === state.library) || LIBRARIES[0];
 
   const recommendations = useMemo(() => {
     const result = {};
@@ -118,11 +139,12 @@ export default function App() {
   const openLibrarySearch = async (book) => {
     try {
       await navigator.clipboard.writeText(book.title);
-      showNotice(`“${book.title}” 제목을 복사했어요. 검색결과에서 ${selectedLibrary}만 체크해 주세요.`, 4000);
+      const extra = selectedLibrary.integrated ? ` 검색결과에서 ${selectedLibrary.name}만 체크해 주세요.` : '';
+      showNotice(`“${book.title}” 제목을 복사했어요.${extra}`, 4000);
     } catch {
-      showNotice(`${selectedLibrary}에서 “${book.title}”을 검색해 주세요.`, 3500);
+      showNotice(`${selectedLibrary.name}에서 “${book.title}”을 검색해 주세요.`, 3500);
     }
-    window.open(GANGNAM_SEARCH_URL, '_blank', 'noopener,noreferrer');
+    window.open(selectedLibrary.url, '_blank', 'noopener,noreferrer');
   };
 
   const testTelegram = async () => {
@@ -161,18 +183,18 @@ export default function App() {
       <main>
         <section className="library-note">
           <div className="library-summary">
-            <strong>주 이용 도서관: {selectedLibrary}</strong>
-            <span>강남구 도서관 목록에서 선택하면 모든 추천 카드의 확인 버튼도 함께 바뀝니다.</span>
+            <strong>주 이용 도서관: {selectedLibrary.name}</strong>
+            <span>{selectedLibrary.integrated ? '이 도서관은 강남구 통합 간략검색으로 연결됩니다.' : '선택한 도서관의 공식 간략검색 페이지로 바로 연결됩니다.'}</span>
           </div>
           <div className="library-controls">
             <label>
               <span>도서관 선택</span>
-              <select value={selectedLibrary} onChange={(event) => setState((prev) => ({ ...prev, library: event.target.value }))}>
-                {LIBRARIES.map((library) => <option key={library} value={library}>{library}</option>)}
+              <select value={selectedLibrary.name} onChange={(event) => setState((prev) => ({ ...prev, library: event.target.value }))}>
+                {LIBRARIES.map((library) => <option key={library.name} value={library.name}>{library.name}</option>)}
               </select>
             </label>
-            <a href={GANGNAM_SEARCH_URL} target="_blank" rel="noreferrer">
-              {selectedLibrary} 자료검색 <ExternalLink size={15} />
+            <a href={selectedLibrary.url} target="_blank" rel="noreferrer">
+              {selectedLibrary.name} 간략검색 <ExternalLink size={15} />
             </a>
           </div>
         </section>
@@ -217,7 +239,7 @@ export default function App() {
                 <p className="reason">{book.reason}</p>
               </div>
               <div className="book-actions">
-                <button className="library-button" onClick={() => openLibrarySearch(book)}><ExternalLink size={18} /> {selectedLibrary} 확인</button>
+                <button className="library-button" onClick={() => openLibrarySearch(book)}><ExternalLink size={18} /> {selectedLibrary.name} 확인</button>
                 <button className="read-button" onClick={() => toggleRead(activeProfile, book.id)} title="읽은 책으로 표시"><Circle size={20} /> 읽었어요</button>
               </div>
             </article>
@@ -247,7 +269,7 @@ export default function App() {
 
       <footer>
         <strong>SuggestBook</strong>
-        <span>선택한 도서관은 이 브라우저에 저장됩니다. 현재는 강남구 통합검색 결과에서 선택 도서관만 확인하는 방식입니다.</span>
+        <span>선택한 도서관은 이 브라우저에 저장됩니다. 구립 도서관은 각 도서관의 공식 간략검색으로, 주민도서관은 강남구 통합 간략검색으로 연결됩니다.</span>
       </footer>
     </div>
   );
