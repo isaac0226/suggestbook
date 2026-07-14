@@ -77,83 +77,138 @@ async function callGemini({ apiKey, model, prompt, maxOutputTokens = 128, temper
   return result;
 }
 
-async function searchGoogleBooks(title, author) {
-  const query = [title, author].filter(Boolean).join(' ');
-  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=10&printType=books`;
+function scoreCandidate(candidate, title, identity) {
+  const creators = [...candidate.authors, candidate.publisher].filter(Boolean).join(' ');
+  const titleScore = similarity(title, candidate.title);
+  const identityScore = identity ? similarity(identity, creators) : 0.5;
+  const titleContains = normalizeText(candidate.title).includes(normalizeText(title)) || normalizeText(title).includes(normalizeText(candidate.title));
+  const seriesBonus = titleContains && normalizeText(candidate.title) !== normalizeText(title) ? 0.08 : 0;
+  return Math.min(1, titleScore * 0.76 + identityScore * 0.16 + seriesBonus);
+}
+
+async function searchGoogleBooksQuery(query, title, identity) {
+  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=20&printType=books`;
   const response = await fetch(url);
-  if (!response.ok) return null;
+  if (!response.ok) return [];
   const result = await response.json();
-  const candidates = (result.items || []).map((item) => {
+  return (result.items || []).map((item) => {
     const info = item.volumeInfo || {};
-    const creators = [...(info.authors || []), info.publisher].filter(Boolean).join(' ');
-    const titleScore = similarity(title, info.title || '');
-    const creatorScore = author ? similarity(author, creators) : 0.5;
-    const score = titleScore * 0.78 + creatorScore * 0.22;
-    return {
-      score,
+    const candidate = {
+      id: item.id || '',
       title: info.title || title,
+      subtitle: info.subtitle || '',
       authors: info.authors || [],
       publisher: info.publisher || '',
       publishedDate: info.publishedDate || '',
       description: (info.description || '').replace(/<[^>]+>/g, ' ').slice(0, 3500),
       categories: info.categories || [],
-      isbn: (info.industryIdentifiers || []).find((item) => item.type === 'ISBN_13')?.identifier || '',
+      isbn: (info.industryIdentifiers || []).find((entry) => entry.type === 'ISBN_13')?.identifier || '',
     };
-  }).sort((a, b) => b.score - a.score);
-  return candidates[0] || null;
+    return { ...candidate, score: scoreCandidate(candidate, title, identity) };
+  });
 }
 
-async function correctBookInput({ apiKey, model, title, author }) {
-  const prompt = `사용자가 한국어로 책 정보를 입력했습니다. 오타, 띄어쓰기 오류, 외국인 이름의 표기 차이가 있을 수 있습니다. 실제 책을 확실히 식별할 수 있을 때만 교정하세요. 추측하지 마세요.\n입력 제목: ${title}\n입력 저자·옮긴이·출판사: ${author}\n\nJSON만 출력하세요.\n{"title":"교정된 실제 제목 또는 입력 제목","author":"교정된 저자·옮긴이·출판사 또는 입력값","confidence":0.0}`;
-  const result = await callGemini({ apiKey, model, prompt, maxOutputTokens: 180, temperature: 0 });
+async function searchGoogleBooks(title, identity, extraTerms = []) {
+  const queries = [
+    [title, identity].filter(Boolean).join(' '),
+    `intitle:${title}`,
+    title,
+    ...extraTerms.filter(Boolean).map((term) => [title, term].join(' ')),
+  ];
+  const results = await Promise.all([...new Set(queries)].map((query) => searchGoogleBooksQuery(query, title, identity)));
+  const unique = new Map();
+  results.flat().forEach((candidate) => {
+    const key = candidate.isbn || candidate.id || `${normalizeText(candidate.title)}-${normalizeText(candidate.publisher)}`;
+    const previous = unique.get(key);
+    if (!previous || candidate.score > previous.score) unique.set(key, candidate);
+  });
+  return [...unique.values()].sort((a, b) => b.score - a.score)[0] || null;
+}
+
+async function expandBookIdentity({ apiKey, model, title, identity }) {
+  const prompt = `사용자가 책 표지에서 크게 보이는 제목과, 저자·옮긴이·출판사·브랜드·제작사 중 하나로 보이는 정보를 입력했습니다. 표지의 작은 시리즈명이나 캐릭터 브랜드명은 사용자가 빼먹었을 수 있습니다. 오타, 띄어쓰기 오류, 외국인 이름 표기 차이도 허용하세요.
+
+입력 제목: ${title}
+입력 보조 정보: ${identity}
+
+해야 할 일:
+1. 입력 제목을 핵심 부제 또는 권별 제목으로 보고, 앞에 생략된 시리즈명·브랜드명이 있는지 판단하세요.
+2. 보조 정보가 저자인지, 옮긴이인지, 출판사인지, 브랜드인지, 제작사인지 추정하세요.
+3. 실제 책을 확실히 식별할 수 있을 때만 정식 제목을 확장하세요. 모르면 입력값을 유지하세요.
+4. 예: 표지에 크게 '별을 타고 온 소녀', 작게 '슈팅스타 캐치! 티니핑'이 있다면 canonicalTitle은 전체 정식 제목이 되도록 합니다.
+5. 책 내용을 지어내지 말고 식별 정보만 반환하세요.
+
+JSON만 출력하세요.
+{"canonicalTitle":"정식 전체 제목 또는 입력 제목","shortTitle":"표지에서 크게 보이는 제목","series":"시리즈·브랜드명 또는 빈 문자열","creator":"확인된 저자·글·그림 또는 빈 문자열","publisher":"확인된 출판사 또는 빈 문자열","brand":"브랜드·제작사 또는 빈 문자열","identityRole":"author|translator|publisher|brand|producer|unknown","searchTerms":["추가 검색어"],"confidence":0.0}`;
+  const result = await callGemini({ apiKey, model, prompt, maxOutputTokens: 320, temperature: 0 });
   const text = result?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
   return extractJson(text);
 }
 
-async function resolveBook({ apiKey, model, title, author }) {
-  let match = await searchGoogleBooks(title, author);
-  let corrected = null;
+async function resolveBook({ apiKey, model, title, identity }) {
+  let match = await searchGoogleBooks(title, identity);
+  let expanded = null;
 
-  if (!match || match.score < 0.58) {
+  if (!match || match.score < 0.72 || !match.description) {
     try {
-      corrected = await correctBookInput({ apiKey, model, title, author });
-      if (corrected?.confidence >= 0.65) {
-        const correctedMatch = await searchGoogleBooks(corrected.title, corrected.author);
-        if (correctedMatch && (!match || correctedMatch.score > match.score)) match = correctedMatch;
+      expanded = await expandBookIdentity({ apiKey, model, title, identity });
+      if (expanded?.confidence >= 0.58) {
+        const expandedTitle = expanded.canonicalTitle || title;
+        const expandedIdentity = expanded.creator || expanded.publisher || expanded.brand || identity;
+        const expandedMatch = await searchGoogleBooks(expandedTitle, expandedIdentity, [
+          expanded.series,
+          expanded.brand,
+          expanded.publisher,
+          ...(expanded.searchTerms || []),
+        ]);
+        if (expandedMatch && (!match || expandedMatch.score >= match.score - 0.03)) match = expandedMatch;
       }
     } catch {
-      corrected = null;
+      expanded = null;
     }
   }
 
-  if (match && match.score >= 0.48) {
+  if (match && match.score >= 0.46) {
+    const canonicalTitle = expanded?.confidence >= 0.7 && expanded.canonicalTitle
+      ? expanded.canonicalTitle
+      : match.title;
     return {
-      title: match.title,
-      author: match.authors.join(', ') || match.publisher || author,
-      publisher: match.publisher,
+      title: canonicalTitle,
+      catalogTitle: match.title,
+      shortTitle: title,
+      series: expanded?.series || '',
+      author: match.authors.join(', ') || expanded?.creator || match.publisher || identity,
+      publisher: match.publisher || expanded?.publisher || '',
+      brand: expanded?.brand || '',
+      identityRole: expanded?.identityRole || 'unknown',
       publishedDate: match.publishedDate,
       description: match.description,
       categories: match.categories,
       isbn: match.isbn,
-      confidence: match.score,
-      corrected: normalizeText(match.title) !== normalizeText(title) || similarity(author, `${match.authors.join(' ')} ${match.publisher}`) < 0.9,
+      confidence: Math.max(match.score, expanded?.confidence || 0),
+      corrected: normalizeText(canonicalTitle) !== normalizeText(title),
       originalTitle: title,
-      originalAuthor: author,
+      originalAuthor: identity,
     };
   }
 
   return {
-    title: corrected?.confidence >= 0.65 ? corrected.title : title,
-    author: corrected?.confidence >= 0.65 ? corrected.author : author,
-    publisher: '',
+    title: expanded?.confidence >= 0.58 ? expanded.canonicalTitle : title,
+    catalogTitle: '',
+    shortTitle: title,
+    series: expanded?.series || '',
+    author: expanded?.creator || expanded?.publisher || expanded?.brand || identity,
+    publisher: expanded?.publisher || '',
+    brand: expanded?.brand || '',
+    identityRole: expanded?.identityRole || 'unknown',
     publishedDate: '',
     description: '',
     categories: [],
     isbn: '',
-    confidence: corrected?.confidence || 0,
-    corrected: Boolean(corrected?.confidence >= 0.65),
+    confidence: expanded?.confidence || 0,
+    corrected: Boolean(expanded?.confidence >= 0.58 && normalizeText(expanded.canonicalTitle) !== normalizeText(title)),
     originalTitle: title,
-    originalAuthor: author,
+    originalAuthor: identity,
   };
 }
 
@@ -200,24 +255,27 @@ export default async function handler(req, res) {
   }
 
   try {
-    const book = await resolveBook({ apiKey, model, title: title.trim(), author: author.trim() });
+    const book = await resolveBook({ apiKey, model, title: title.trim(), identity: author.trim() });
     const reference = [
-      `확인된 제목: ${book.title}`,
-      `확인된 저자·출판사: ${book.author}${book.publisher ? ` / ${book.publisher}` : ''}`,
+      `사용자가 본 큰 제목: ${book.shortTitle}`,
+      `확인된 전체 제목: ${book.title}`,
+      book.series ? `시리즈·브랜드: ${book.series}` : '',
+      `확인된 저자·출판사·브랜드: ${book.author}${book.publisher ? ` / ${book.publisher}` : ''}${book.brand ? ` / ${book.brand}` : ''}`,
+      `입력 보조 정보의 추정 역할: ${book.identityRole}`,
       book.publishedDate ? `출간 정보: ${book.publishedDate}` : '',
       book.isbn ? `ISBN: ${book.isbn}` : '',
       book.categories.length ? `분류: ${book.categories.join(', ')}` : '',
       book.description ? `공식 도서 설명: ${book.description}` : '공식 도서 설명을 찾지 못함',
     ].filter(Boolean).join('\n');
 
-    const prompt = `당신은 한국 초등학생을 위한 정확한 독서퀴즈 출제자입니다.\n${reference}\n대상: ${grade}\n문제 수: ${questionCount}\n\n중요 규칙:\n1. 위에서 확인된 책 한 권만 다루세요. 비슷한 제목의 다른 책이나 영화, 애니메이션 내용을 섞지 마세요.\n2. 공식 도서 설명과 널리 확인되는 실제 내용에 근거한 문제만 만드세요. 확실하지 않은 세부 인물명, 물건, 대사, 사건은 출제하지 마세요.\n3. 책 내용을 충분히 확신할 수 없다면 문제를 지어내지 말고 JSON의 error에 “책 내용을 정확히 확인하기 어렵습니다. 책 표지의 ISBN이나 출판사를 추가해 주세요.”라고 적으세요.\n4. 등장인물, 사건, 배경, 원인과 결과, 핵심 메시지를 골고루 묻되 ${grade} 수준의 쉬운 한국어를 사용하세요.\n5. 선택지는 정확히 4개이며 정답은 0부터 3까지의 배열 인덱스입니다.\n6. 모호하거나 의견에 따라 답이 달라지는 문제, 제목만 보고 맞힐 수 있는 문제는 만들지 마세요.\n7. explanation은 책 내용에 따른 정답 근거를 한두 문장으로 설명하세요.\n8. hint는 정답을 직접 말하지 않고 장면이나 인물을 떠올리게 하는 한 문장으로 쓰세요.\n9. skill은 해당 문제가 확인하는 능력을 12자 이내로 쓰세요. 예: 인물 이해, 사건 순서, 원인과 결과, 핵심 주제, 세부 기억.\n10. 기존 문제를 재출제하는 상황일 수 있으므로 서로 다른 장면과 표현을 사용하세요.\n\n반드시 아래 JSON만 출력하세요.\n{\n  "title": "확인된 책 제목",\n  "author": "확인된 저자 또는 출판사",\n  "questions": [\n    {\n      "question": "문제",\n      "options": ["선택지1", "선택지2", "선택지3", "선택지4"],\n      "answer": 0,\n      "hint": "정답을 직접 밝히지 않는 힌트",\n      "skill": "확인 능력",\n      "explanation": "정답 설명"\n    }\n  ]\n}`;
+    const prompt = `당신은 한국 초등학생을 위한 정확한 독서퀴즈 출제자입니다.\n${reference}\n대상: ${grade}\n문제 수: ${questionCount}\n\n중요 규칙:\n1. 위에서 확인된 책 한 권만 다루세요. 짧은 권별 제목만 입력되었더라도 확인된 시리즈·브랜드를 함께 고려하세요.\n2. 같은 시리즈의 다른 권, 원작 애니메이션의 다른 회차, 비슷한 제목의 책 내용을 섞지 마세요.\n3. 공식 도서 설명과 널리 확인되는 실제 내용에 근거한 문제만 만드세요. 확실하지 않은 세부 인물명, 물건, 대사, 사건은 출제하지 마세요.\n4. 책 내용을 충분히 확신할 수 없다면 문제를 지어내지 말고 JSON의 error에 “책은 찾았지만 정확한 본문 내용을 충분히 확인하기 어렵습니다. 책 소개나 줄거리를 추가해 주세요.”라고 적으세요.\n5. 등장인물, 사건, 배경, 원인과 결과, 핵심 메시지를 골고루 묻되 ${grade} 수준의 쉬운 한국어를 사용하세요.\n6. 선택지는 정확히 4개이며 정답은 0부터 3까지의 배열 인덱스입니다.\n7. 모호하거나 의견에 따라 답이 달라지는 문제, 제목만 보고 맞힐 수 있는 문제는 만들지 마세요.\n8. explanation은 책 내용에 따른 정답 근거를 한두 문장으로 설명하세요.\n9. hint는 정답을 직접 말하지 않고 장면이나 인물을 떠올리게 하는 한 문장으로 쓰세요.\n10. skill은 해당 문제가 확인하는 능력을 12자 이내로 쓰세요. 예: 인물 이해, 사건 순서, 원인과 결과, 핵심 주제, 세부 기억.\n\n반드시 아래 JSON만 출력하세요.\n{\n  "title": "확인된 책 제목",\n  "author": "확인된 저자 또는 출판사",\n  "questions": [\n    {\n      "question": "문제",\n      "options": ["선택지1", "선택지2", "선택지3", "선택지4"],\n      "answer": 0,\n      "hint": "정답을 직접 밝히지 않는 힌트",\n      "skill": "확인 능력",\n      "explanation": "정답 설명"\n    }\n  ]\n}`;
 
     const result = await callGemini({
       apiKey,
       model,
       prompt,
       maxOutputTokens: questionCount === 10 ? 5600 : 3400,
-      temperature: 0.25,
+      temperature: 0.2,
     });
     const text = result?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
     const parsed = extractJson(text);
@@ -233,6 +291,13 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('quiz generation error', error);
-    return send(res, 500, { message: error.message || '퀴즈 생성 중 오류가 발생했습니다.' });
+    const message = error.message || '퀴즈 생성 중 오류가 발생했습니다.';
+    if (/high demand|overloaded|temporarily unavailable/i.test(message)) {
+      return send(res, 503, { message: '지금 퀴즈 요청이 많아 잠시 혼잡합니다. 잠시 후 다시 시도해 주세요.' });
+    }
+    if (/quota exceeded|rate limit|resource_exhausted/i.test(message)) {
+      return send(res, 429, { message: '잠시 동안 퀴즈 요청이 많았습니다. 10초 정도 후 다시 시도해 주세요.' });
+    }
+    return send(res, 500, { message });
   }
 }
