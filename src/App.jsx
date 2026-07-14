@@ -3,13 +3,16 @@ import { BookOpen, CheckCircle2, Circle, Copy, ExternalLink, RefreshCw, Search, 
 import { catalog, profiles } from './catalog';
 
 const STORAGE_KEY = 'suggestbook-state-v1';
-const LIBRARIES = {
-  segok: {
-    id: 'segok',
-    name: '세곡도서관',
-    searchUrl: 'https://library.gangnam.go.kr/sklib/menu/11285/program/30001/plusSearchSimple.do',
-  },
-};
+const GANGNAM_SEARCH_URL = 'https://library.gangnam.go.kr/sklib/menu/11285/program/30001/plusSearchSimple.do';
+
+const LIBRARIES = [
+  '세곡도서관', '도곡정보문화도서관', '개포하늘꿈도서관', '논현도서관', '논현문화마루도서관',
+  '논현문화마루도서관(별관)', '대치1작은도서관', '대치도서관', '못골도서관', '못골한옥어린이도서관',
+  '삼성도서관', '세곡마루도서관', '역삼2작은도서관', '역삼도서관', '역삼푸른솔도서관',
+  '열린도서관', '일원라온영어도서관', '정다운도서관', '즐거운도서관', '청담도서관',
+  '행복한도서관', '개포4동주민도서관', '도곡2동주민도서관', '신사동주민도서관', '압구정동주민도서관',
+  '일원본동주민도서관', '개포1동주민도서관'
+];
 
 function getWeekKey(date = new Date()) {
   const copy = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -35,14 +38,11 @@ function getRecommendationCount(profile) {
 }
 
 function loadState() {
-  const fallback = {
-    read: {},
-    weekSalt: 0,
-    libraryId: 'segok',
-    customLibrary: { name: '', searchUrl: '' },
-  };
+  const fallback = { read: {}, weekSalt: 0, library: '세곡도서관' };
   try {
-    return { ...fallback, ...(JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}) };
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+    const previousLibrary = saved.library || (saved.libraryId === 'segok' ? '세곡도서관' : undefined);
+    return { ...fallback, ...saved, library: previousLibrary || fallback.library };
   } catch {
     return fallback;
   }
@@ -59,13 +59,7 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
-  const selectedLibrary = state.libraryId === 'custom'
-    ? {
-        id: 'custom',
-        name: state.customLibrary?.name?.trim() || '선택한 도서관',
-        searchUrl: state.customLibrary?.searchUrl?.trim() || '',
-      }
-    : LIBRARIES[state.libraryId] || LIBRARIES.segok;
+  const selectedLibrary = state.library || '세곡도서관';
 
   const recommendations = useMemo(() => {
     const result = {};
@@ -103,10 +97,7 @@ export default function App() {
   const restoreBook = (profileId, bookId) => {
     setState((prev) => ({
       ...prev,
-      read: {
-        ...prev.read,
-        [profileId]: (prev.read[profileId] || []).filter((id) => id !== bookId),
-      },
+      read: { ...prev.read, [profileId]: (prev.read[profileId] || []).filter((id) => id !== bookId) },
     }));
   };
 
@@ -127,16 +118,11 @@ export default function App() {
   const openLibrarySearch = async (book) => {
     try {
       await navigator.clipboard.writeText(book.title);
-      showNotice(`“${book.title}” 제목을 복사했어요. ${selectedLibrary.name} 검색창에 붙여넣어 주세요.`, 3500);
+      showNotice(`“${book.title}” 제목을 복사했어요. 검색결과에서 ${selectedLibrary}만 체크해 주세요.`, 4000);
     } catch {
-      showNotice(`${selectedLibrary.name}에서 “${book.title}”을 검색해 주세요.`, 3500);
+      showNotice(`${selectedLibrary}에서 “${book.title}”을 검색해 주세요.`, 3500);
     }
-
-    if (!selectedLibrary.searchUrl) {
-      showNotice('도서관 자료검색 주소를 먼저 입력해 주세요.', 3000);
-      return;
-    }
-    window.open(selectedLibrary.searchUrl, '_blank', 'noopener,noreferrer');
+    window.open(GANGNAM_SEARCH_URL, '_blank', 'noopener,noreferrer');
   };
 
   const testTelegram = async () => {
@@ -175,48 +161,19 @@ export default function App() {
       <main>
         <section className="library-note">
           <div className="library-summary">
-            <strong>주 이용 도서관: {selectedLibrary.name}</strong>
-            <span>도서관을 바꾸면 모든 추천 카드의 확인 버튼도 함께 바뀝니다.</span>
+            <strong>주 이용 도서관: {selectedLibrary}</strong>
+            <span>강남구 도서관 목록에서 선택하면 모든 추천 카드의 확인 버튼도 함께 바뀝니다.</span>
           </div>
           <div className="library-controls">
             <label>
               <span>도서관 선택</span>
-              <select
-                value={state.libraryId}
-                onChange={(event) => setState((prev) => ({ ...prev, libraryId: event.target.value }))}
-              >
-                <option value="segok">세곡도서관</option>
-                <option value="custom">다른 도서관 직접 설정</option>
+              <select value={selectedLibrary} onChange={(event) => setState((prev) => ({ ...prev, library: event.target.value }))}>
+                {LIBRARIES.map((library) => <option key={library} value={library}>{library}</option>)}
               </select>
             </label>
-            {state.libraryId === 'custom' && (
-              <div className="custom-library-fields">
-                <input
-                  value={state.customLibrary?.name || ''}
-                  onChange={(event) => setState((prev) => ({
-                    ...prev,
-                    customLibrary: { ...prev.customLibrary, name: event.target.value },
-                  }))}
-                  placeholder="도서관 이름"
-                />
-                <input
-                  type="url"
-                  value={state.customLibrary?.searchUrl || ''}
-                  onChange={(event) => setState((prev) => ({
-                    ...prev,
-                    customLibrary: { ...prev.customLibrary, searchUrl: event.target.value },
-                  }))}
-                  placeholder="자료검색 페이지 주소 https://..."
-                />
-              </div>
-            )}
-            {selectedLibrary.searchUrl ? (
-              <a href={selectedLibrary.searchUrl} target="_blank" rel="noreferrer">
-                {selectedLibrary.name} 자료검색 <ExternalLink size={15} />
-              </a>
-            ) : (
-              <button className="disabled-library-link" disabled>자료검색 주소를 입력해 주세요</button>
-            )}
+            <a href={GANGNAM_SEARCH_URL} target="_blank" rel="noreferrer">
+              {selectedLibrary} 자료검색 <ExternalLink size={15} />
+            </a>
           </div>
         </section>
 
@@ -260,7 +217,7 @@ export default function App() {
                 <p className="reason">{book.reason}</p>
               </div>
               <div className="book-actions">
-                <button className="library-button" onClick={() => openLibrarySearch(book)}><ExternalLink size={18} /> {selectedLibrary.name} 확인</button>
+                <button className="library-button" onClick={() => openLibrarySearch(book)}><ExternalLink size={18} /> {selectedLibrary} 확인</button>
                 <button className="read-button" onClick={() => toggleRead(activeProfile, book.id)} title="읽은 책으로 표시"><Circle size={20} /> 읽었어요</button>
               </div>
             </article>
@@ -290,7 +247,7 @@ export default function App() {
 
       <footer>
         <strong>SuggestBook</strong>
-        <span>선택한 도서관과 읽은 책 기록은 이 브라우저에 저장됩니다. 다른 기기에서는 도서관을 다시 선택해 주세요.</span>
+        <span>선택한 도서관은 이 브라우저에 저장됩니다. 현재는 강남구 통합검색 결과에서 선택 도서관만 확인하는 방식입니다.</span>
       </footer>
     </div>
   );
