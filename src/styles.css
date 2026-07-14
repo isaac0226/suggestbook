@@ -58,7 +58,10 @@ main { max-width: 1240px; margin: 0 auto; padding: 0 34px 64px; }
 .rank { color: #a69f91; font-weight: 800; font-size: 13px; padding-top: 3px; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tags span { background: #eef0e6; color: #657151; border-radius: 999px; padding: 5px 9px; font-size: 11px; font-weight: 700; }
-.book-card h3 { margin: 15px 0 4px; font-size: 23px; letter-spacing: -.035em; }
+.title-row { margin: 15px 0 4px; display: flex; align-items: center; gap: 8px; }
+.book-card h3 { margin: 0; font-size: 23px; letter-spacing: -.035em; }
+.copy-title-button { flex: 0 0 auto; width: 32px; height: 32px; border: 1px solid #ddd7cb; border-radius: 10px; background: #f7f4ed; color: #657151; display: grid; place-items: center; }
+.copy-title-button:hover { background: #eef0e6; color: #25231f; }
 .author { margin: 0; color: #827c72; font-size: 13px; }
 .reason { margin: 15px 0 62px; color: #66615a; line-height: 1.7; font-size: 14px; }
 .book-actions { position: absolute; left: 90px; right: 22px; bottom: 18px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
