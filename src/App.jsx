@@ -24,6 +24,10 @@ function seededScore(text, seed) {
   return h >>> 0;
 }
 
+function getRecommendationCount(profile) {
+  return profile.id === 'ire' || profile.id === 'iseol' ? 10 : profile.count;
+}
+
 function loadState() {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { read: {}, weekSalt: 0 };
@@ -50,12 +54,13 @@ export default function App() {
       const candidates = catalog
         .filter((book) => book.audience.includes(profile.id) && !readIds.has(book.id))
         .sort((a, b) => seededScore(a.id, `${weekKey}-${state.weekSalt}-${profile.id}`) - seededScore(b.id, `${weekKey}-${state.weekSalt}-${profile.id}`));
-      result[profile.id] = candidates.slice(0, profile.count);
+      result[profile.id] = candidates.slice(0, getRecommendationCount(profile));
     });
     return result;
   }, [state, weekKey]);
 
   const profile = profiles.find((item) => item.id === activeProfile);
+  const profileRecommendationCount = getRecommendationCount(profile);
   const shownBooks = (recommendations[activeProfile] || []).filter((book) => {
     const target = `${book.title} ${book.author} ${book.tags.join(' ')}`.toLowerCase();
     return target.includes(query.trim().toLowerCase());
@@ -138,7 +143,7 @@ export default function App() {
         <div className="hero-card">
           <BookOpen size={44} />
           <strong>{weekKey.replace('-', '년 ')}주차</strong>
-          <span>아이 20권씩 · 부모 5권씩</span>
+          <span>이레 10권 · 이설 10권 · 부모 5권씩</span>
         </div>
       </header>
 
@@ -167,7 +172,7 @@ export default function App() {
         <section className="toolbar">
           <div>
             <p className="section-kicker">{profile.emoji} {profile.name}</p>
-            <h2>이번 주 추천 {profile.count}권</h2>
+            <h2>이번 주 추천 {profileRecommendationCount}권</h2>
           </div>
           <label className="search-box">
             <Search size={18} />
