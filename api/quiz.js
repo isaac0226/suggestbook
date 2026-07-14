@@ -24,39 +24,56 @@ function validateQuiz(data, expectedCount) {
   return data;
 }
 
+async function callGemini({ apiKey, model, prompt, maxOutputTokens = 128, temperature = 0 }) {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature, maxOutputTokens },
+    }),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result?.error?.message || 'Gemini API 요청에 실패했습니다.');
+  return result;
+}
+
 export default async function handler(req, res) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const model = process.env.GEMINI_QUIZ_MODEL || 'gemini-2.5-flash-lite';
+
+  if (req.method === 'GET' && req.query?.health === '1') {
+    if (!apiKey) return send(res, 503, { ok: false, configured: false, model, message: 'GEMINI_API_KEY가 없습니다.' });
+    try {
+      await callGemini({ apiKey, model, prompt: 'Reply with only OK.', maxOutputTokens: 8, temperature: 0 });
+      return send(res, 200, { ok: true, configured: true, model });
+    } catch (error) {
+      return send(res, 502, { ok: false, configured: true, model, message: error.message });
+    }
+  }
+
   if (req.method !== 'POST') return send(res, 405, { message: 'POST 요청만 사용할 수 있습니다.' });
 
   const { grade, title, author, count } = req.body || {};
   const questionCount = Number(count);
   if (!grade || !title?.trim() || !author?.trim() || !ALLOWED_COUNTS.has(questionCount)) {
-    return send(res, 400, { message: '학년, 책 이름, 저자, 문제 수를 확인해 주세요.' });
+    return send(res, 400, { message: '학년, 책 이름, 저자·옮긴이·출판사, 문제 수를 확인해 주세요.' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return send(res, 503, { message: 'Vercel 환경변수에 GEMINI_API_KEY를 등록하면 퀴즈를 만들 수 있어요.' });
   }
 
-  const model = process.env.GEMINI_QUIZ_MODEL || 'gemini-2.5-flash-lite';
-  const prompt = `당신은 한국 초등학생을 위한 독서퀴즈 출제자입니다.\n책: “${title.trim()}”\n저자: ${author.trim()}\n대상: ${grade}\n문제 수: ${questionCount}\n\n규칙:\n1. 책의 실제 내용에 근거한 객관식 문제만 만드세요. 책 내용을 확실히 알 수 없다면 지어내지 말고 JSON의 error에 그 사실을 적으세요.\n2. 등장인물, 사건, 배경, 핵심 메시지를 골고루 묻되 학년 수준에 맞는 쉬운 한국어를 사용하세요.\n3. 선택지는 정확히 4개이며 정답은 0부터 3까지의 배열 인덱스입니다.\n4. 모호하거나 의견에 따라 답이 달라지는 문제는 만들지 마세요.\n5. 기존 문제를 재출제하는 상황일 수 있으므로 서로 다른 장면과 표현을 사용하세요.\n6. 설명은 한두 문장으로 짧게 쓰세요.\n\n반드시 아래 JSON만 출력하세요.\n{\n  "title": "책 이름",\n  "author": "저자",\n  "grade": "대상 학년",\n  "questions": [\n    {\n      "question": "문제",\n      "options": ["선택지1", "선택지2", "선택지3", "선택지4"],\n      "answer": 0,\n      "explanation": "정답 설명"\n    }\n  ]\n}`;
+  const prompt = `당신은 한국 초등학생을 위한 독서퀴즈 출제자입니다.\n책: “${title.trim()}”\n책 식별 정보(저자, 옮긴이 또는 출판사): ${author.trim()}\n대상: ${grade}\n문제 수: ${questionCount}\n\n규칙:\n1. 입력된 책 제목과 식별 정보를 함께 사용해 정확한 판본을 찾으세요. 저자가 아니라 옮긴이 또는 출판사가 입력될 수도 있습니다.\n2. 책의 실제 내용에 근거한 객관식 문제만 만드세요. 책 내용을 확실히 알 수 없다면 지어내지 말고 JSON의 error에 그 사실을 적으세요.\n3. 등장인물, 사건, 배경, 핵심 메시지를 골고루 묻되 학년 수준에 맞는 쉬운 한국어를 사용하세요.\n4. 선택지는 정확히 4개이며 정답은 0부터 3까지의 배열 인덱스입니다.\n5. 모호하거나 의견에 따라 답이 달라지는 문제는 만들지 마세요.\n6. 기존 문제를 재출제하는 상황일 수 있으므로 서로 다른 장면과 표현을 사용하세요.\n7. 설명은 한두 문장으로 짧게 쓰세요.\n\n반드시 아래 JSON만 출력하세요.\n{\n  "title": "책 이름",\n  "author": "입력된 책 식별 정보",\n  "grade": "대상 학년",\n  "questions": [\n    {\n      "question": "문제",\n      "options": ["선택지1", "선택지2", "선택지3", "선택지4"],\n      "answer": 0,\n      "explanation": "정답 설명"\n    }\n  ]\n}`;
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.65,
-          responseMimeType: 'application/json',
-          maxOutputTokens: questionCount === 10 ? 4096 : 2500,
-        },
-      }),
+    const result = await callGemini({
+      apiKey,
+      model,
+      prompt,
+      maxOutputTokens: questionCount === 10 ? 4096 : 2500,
+      temperature: 0.65,
     });
-
-    const result = await response.json();
-    if (!response.ok) throw new Error(result?.error?.message || 'Gemini API 요청에 실패했습니다.');
     const text = result?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
     const parsed = extractJson(text);
     if (parsed.error) return send(res, 422, { message: parsed.error });
