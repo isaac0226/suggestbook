@@ -1,0 +1,13 @@
+.quiz-progress { margin: 0 0 14px; display: flex; align-items: center; gap: 12px; color: #657151; font-size: 13px; font-weight: 800; }
+.quiz-progress > div { flex: 1; height: 7px; border-radius: 999px; overflow: hidden; background: #e5dfd4; }
+.quiz-progress i { display: block; height: 100%; border-radius: inherit; background: #84945f; transition: width .25s ease; }
+.question-card.single { min-height: 440px; }
+.hint-button { margin: -4px 0 16px; border: 1px solid #d8d1c5; border-radius: 999px; padding: 9px 13px; background: #fffaf0; color: #78672e; display: inline-flex; align-items: center; gap: 7px; font-weight: 800; }
+.hint-box { margin: -5px 0 16px; padding: 14px 16px; border-radius: 14px; background: #fff5cf; color: #6b5b25; display: flex; align-items: flex-start; gap: 9px; line-height: 1.6; }
+.hint-box svg { flex: 0 0 auto; margin-top: 3px; }
+.question-navigation { margin-top: 16px; display: flex; justify-content: space-between; gap: 10px; }
+.question-navigation button { min-width: 128px; }
+@media (max-width: 720px) {
+  .question-card.single { min-height: 0; }
+  .question-navigation button { min-width: 0; flex: 1; }
+}
