@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, BookOpenCheck, CheckCircle2, LoaderCircle, RefreshCw, RotateCcw, Sparkles, XCircle } from 'lucide-react';
+import { ArrowLeft, BookOpenCheck, CheckCircle2, ChevronLeft, ChevronRight, Lightbulb, LoaderCircle, RefreshCw, RotateCcw, Sparkles, XCircle } from 'lucide-react';
 import App from './App';
 
 const GRADES = ['유치원', '초등 1학년', '초등 2학년', '초등 3학년', '초등 4학년', '초등 5학년', '초등 6학년'];
@@ -10,6 +10,8 @@ function QuizPage({ onBack }) {
   const [quiz, setQuiz] = useState(null);
   const [answers, setAnswers] = useState({});
   const [submitted, setSubmitted] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [hints, setHints] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -27,6 +29,8 @@ function QuizPage({ onBack }) {
     setError('');
     setSubmitted(false);
     setAnswers({});
+    setHints({});
+    setCurrentIndex(0);
     try {
       const response = await fetch('/api/quiz', {
         method: 'POST',
@@ -47,11 +51,24 @@ function QuizPage({ onBack }) {
   const reset = () => {
     setQuiz(null);
     setAnswers({});
+    setHints({});
     setSubmitted(false);
+    setCurrentIndex(0);
     setError('');
   };
 
+  const restart = () => {
+    setAnswers({});
+    setHints({});
+    setSubmitted(false);
+    setCurrentIndex(0);
+  };
+
   if (quiz) {
+    const question = quiz.questions[currentIndex];
+    const isCorrect = submitted && answers[currentIndex] === question.answer;
+    const isLast = currentIndex === quiz.questions.length - 1;
+
     return (
       <div className="quiz-page">
         <header className="quiz-header compact">
@@ -69,42 +86,49 @@ function QuizPage({ onBack }) {
             </section>
           )}
 
-          <section className="quiz-list">
-            {quiz.questions.map((question, index) => {
-              const isCorrect = submitted && answers[index] === question.answer;
-              return (
-                <article className={`question-card ${submitted ? (isCorrect ? 'correct' : 'wrong') : ''}`} key={`${question.question}-${index}`}>
-                  <div className="question-number">{String(index + 1).padStart(2, '0')}</div>
-                  <h2>{question.question}</h2>
-                  <div className="options-list">
-                    {question.options.map((option, optionIndex) => (
-                      <button
-                        key={option}
-                        className={answers[index] === optionIndex ? 'selected' : ''}
-                        onClick={() => !submitted && setAnswers((prev) => ({ ...prev, [index]: optionIndex }))}
-                        disabled={submitted}
-                      >
-                        <span>{optionIndex + 1}</span>{option}
-                      </button>
-                    ))}
-                  </div>
-                  {submitted && (
-                    <div className="answer-feedback">
-                      {isCorrect ? <CheckCircle2 size={19} /> : <XCircle size={19} />}
-                      <div><strong>{isCorrect ? '정답이에요' : `정답은 ${question.answer + 1}번이에요`}</strong><p>{question.explanation}</p></div>
-                    </div>
-                  )}
-                </article>
-              );
-            })}
-          </section>
+          <div className="quiz-progress"><span>{currentIndex + 1} / {quiz.questions.length}</span><div><i style={{ width: `${((currentIndex + 1) / quiz.questions.length) * 100}%` }} /></div></div>
+
+          <article className={`question-card single ${submitted ? (isCorrect ? 'correct' : 'wrong') : ''}`}>
+            <div className="question-number">문제 {String(currentIndex + 1).padStart(2, '0')}</div>
+            <h2>{question.question}</h2>
+
+            <button className="hint-button" onClick={() => setHints((prev) => ({ ...prev, [currentIndex]: !prev[currentIndex] }))}>
+              <Lightbulb size={17} /> {hints[currentIndex] ? '힌트 숨기기' : '힌트 보기'}
+            </button>
+            {hints[currentIndex] && <div className="hint-box"><Lightbulb size={18} /><span>{question.hint}</span></div>}
+
+            <div className="options-list">
+              {question.options.map((option, optionIndex) => (
+                <button
+                  key={option}
+                  className={answers[currentIndex] === optionIndex ? 'selected' : ''}
+                  onClick={() => !submitted && setAnswers((prev) => ({ ...prev, [currentIndex]: optionIndex }))}
+                  disabled={submitted}
+                >
+                  <span>{optionIndex + 1}</span>{option}
+                </button>
+              ))}
+            </div>
+
+            {submitted && (
+              <div className="answer-feedback">
+                {isCorrect ? <CheckCircle2 size={19} /> : <XCircle size={19} />}
+                <div><strong>{isCorrect ? '정답이에요' : `정답은 ${question.answer + 1}번이에요`}</strong><p>{question.explanation}</p></div>
+              </div>
+            )}
+          </article>
+
+          <div className="question-navigation">
+            <button className="secondary" disabled={currentIndex === 0} onClick={() => setCurrentIndex((value) => value - 1)}><ChevronLeft size={17} /> 이전</button>
+            {!submitted && isLast ? (
+              <button className="primary" disabled={Object.keys(answers).length !== quiz.questions.length} onClick={() => { setSubmitted(true); setCurrentIndex(0); }}>채점하기</button>
+            ) : (
+              <button className="primary" disabled={isLast || (!submitted && answers[currentIndex] === undefined)} onClick={() => setCurrentIndex((value) => value + 1)}>다음 <ChevronRight size={17} /></button>
+            )}
+          </div>
 
           <div className="quiz-bottom-actions">
-            {!submitted ? (
-              <button className="primary quiz-submit" disabled={Object.keys(answers).length !== quiz.questions.length} onClick={() => setSubmitted(true)}>채점하기</button>
-            ) : (
-              <button className="secondary" onClick={() => { setAnswers({}); setSubmitted(false); }}><RotateCcw size={17} /> 다시 풀기</button>
-            )}
+            {submitted && <button className="secondary" onClick={restart}><RotateCcw size={17} /> 다시 풀기</button>}
             <button className="secondary" onClick={generateQuiz} disabled={loading}><RefreshCw size={17} /> 문제 다시 출제하기</button>
           </div>
           {error && <p className="quiz-error">{error}</p>}
@@ -130,7 +154,7 @@ function QuizPage({ onBack }) {
           <fieldset><legend>문제 수</legend><div className="count-options">{COUNTS.map((count) => <button type="button" className={form.count === count ? 'active' : ''} key={count} onClick={() => setForm({ ...form, count })}>{count}문제</button>)}</div></fieldset>
           <button className="primary generate-button" onClick={generateQuiz} disabled={loading}>{loading ? <><LoaderCircle className="spin" size={18} /> 문제 만드는 중…</> : <><BookOpenCheck size={18} /> 퀴즈 만들기</>}</button>
           {error && <p className="quiz-error">{error}</p>}
-          <p className="quiz-caution">AI가 책의 세부 내용을 잘못 기억할 수 있습니다. 이상한 문제가 나오면 ‘문제 다시 출제하기’를 눌러 주세요.</p>
+          <p className="quiz-caution">문제는 한 문항씩 보여주며, 막힐 때는 ‘힌트 보기’를 눌러 생각을 도울 수 있습니다.</p>
         </section>
       </main>
     </div>
