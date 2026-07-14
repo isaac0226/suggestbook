@@ -126,7 +126,8 @@ async function resolveBook({ apiKey, model, title, identity }) {
       }
     } catch { expanded = null; }
   }
-  if (match && match.score >= 0.46) {
+  const titleMatch = match ? similarity(title, match.title) : 0;
+  if (match && match.score >= 0.58 && titleMatch >= 0.72) {
     const canonicalTitle = expanded?.confidence >= 0.7 && expanded.canonicalTitle ? expanded.canonicalTitle : match.title;
     return {
       title: canonicalTitle, catalogTitle: match.title, shortTitle: title, series: expanded?.series || '',
@@ -137,10 +138,17 @@ async function resolveBook({ apiKey, model, title, identity }) {
     };
   }
   return {
-    title: expanded?.confidence >= 0.58 ? expanded.canonicalTitle : title, catalogTitle: '', shortTitle: title, series: expanded?.series || '',
+    title: expanded?.confidence >= 0.72 ? expanded.canonicalTitle : title, catalogTitle: '', shortTitle: title, series: expanded?.series || '',
     author: expanded?.creator || expanded?.publisher || expanded?.brand || identity, publisher: expanded?.publisher || '', brand: expanded?.brand || '', identityRole: expanded?.identityRole || 'unknown',
     publishedDate: '', description: '', categories: [], isbn: '', confidence: expanded?.confidence || 0,
-    corrected: Boolean(expanded?.confidence >= 0.58 && normalizeText(expanded.canonicalTitle) !== normalizeText(title)), originalTitle: title, originalAuthor: identity,
+    corrected: Boolean(expanded?.confidence >= 0.72 && normalizeText(expanded.canonicalTitle) !== normalizeText(title)), originalTitle: title, originalAuthor: identity,
+  };
+}
+
+function photoBasedBook(title, identity) {
+  return {
+    title, catalogTitle: '', shortTitle: title, series: '', author: identity, publisher: '', brand: '', identityRole: 'unknown',
+    publishedDate: '', description: '', categories: [], isbn: '', confidence: 1, corrected: false, originalTitle: title, originalAuthor: identity,
   };
 }
 
@@ -176,28 +184,39 @@ export default async function handler(req, res) {
   if (!apiKey) return send(res, 503, { message: 'Vercel 환경변수에 GEMINI_API_KEY를 등록하면 퀴즈를 만들 수 있어요.' });
 
   try {
-    const book = await resolveBook({ apiKey, model, title: title.trim(), identity: author.trim() });
+    const inputTitle = title.trim();
+    const inputIdentity = author.trim();
+    const book = safeImages.length
+      ? photoBasedBook(inputTitle, inputIdentity)
+      : await resolveBook({ apiKey, model, title: inputTitle, identity: inputIdentity });
     const reference = [
-      `사용자가 본 큰 제목: ${book.shortTitle}`, `확인된 전체 제목: ${book.title}`, book.series ? `시리즈·브랜드: ${book.series}` : '',
-      `확인된 저자·출판사·브랜드: ${book.author}${book.publisher ? ` / ${book.publisher}` : ''}${book.brand ? ` / ${book.brand}` : ''}`,
-      `입력 보조 정보의 추정 역할: ${book.identityRole}`, book.publishedDate ? `출간 정보: ${book.publishedDate}` : '', book.isbn ? `ISBN: ${book.isbn}` : '',
-      book.categories.length ? `분류: ${book.categories.join(', ')}` : '', book.description ? `공식 도서 설명: ${book.description}` : '공식 도서 설명을 찾지 못함',
-      safeImages.length ? `사용자가 책 내용 사진 ${safeImages.length}장을 함께 제공함` : '사용자 제공 사진 없음',
+      `사용자가 입력한 제목: ${inputTitle}`, `사용자가 입력한 저자·출판사 정보: ${inputIdentity}`,
+      safeImages.length ? '첨부 사진이 있으므로 검색 결과보다 사진 표지와 본문을 우선함' : `확인된 전체 제목: ${book.title}`,
+      !safeImages.length && book.series ? `시리즈·브랜드: ${book.series}` : '',
+      !safeImages.length ? `확인된 저자·출판사·브랜드: ${book.author}${book.publisher ? ` / ${book.publisher}` : ''}${book.brand ? ` / ${book.brand}` : ''}` : '',
+      !safeImages.length && book.publishedDate ? `출간 정보: ${book.publishedDate}` : '',
+      !safeImages.length && book.isbn ? `ISBN: ${book.isbn}` : '',
+      !safeImages.length && book.categories.length ? `분류: ${book.categories.join(', ')}` : '',
+      !safeImages.length && book.description ? `공식 도서 설명: ${book.description}` : '',
+      safeImages.length ? `사용자가 책 사진 ${safeImages.length}장을 제공함` : '사용자 제공 사진 없음',
     ].filter(Boolean).join('\n');
 
-    const prompt = `당신은 한국 초등학생을 위한 정확한 독서퀴즈 출제자입니다.\n${reference}\n대상: ${grade}\n문제 수: ${questionCount}\n\n중요 규칙:\n1. 첨부된 사진이 있다면 사진에 실제로 보이는 글과 장면을 가장 우선적인 근거로 사용하세요. 사진에 없는 내용을 추측하지 마세요.\n2. 사진은 뒷표지 소개, 본문, 판권 페이지일 수 있습니다. 읽을 수 있는 내용만 사용하고 흐리거나 잘린 부분은 추정하지 마세요.\n3. 위에서 확인된 책 한 권만 다루고, 같은 시리즈의 다른 권이나 원작 애니메이션의 다른 회차를 섞지 마세요.\n4. 사진이 없거나 사진 정보가 부족하면 공식 도서 설명과 널리 확인되는 실제 내용만 사용하세요.\n5. 사진 또는 공개 정보로 문제 수만큼 정확한 문제를 만들 수 없다면 지어내지 말고 JSON의 error에 “사진에서 퀴즈를 만들 만큼 책 내용을 충분히 확인하기 어렵습니다. 뒷표지나 본문을 더 선명하게 촬영해 주세요.”라고 적으세요.\n6. 등장인물, 사건, 배경, 원인과 결과, 핵심 메시지를 골고루 묻되 ${grade} 수준의 쉬운 한국어를 사용하세요.\n7. 선택지는 정확히 4개이며 정답은 0부터 3까지의 배열 인덱스입니다.\n8. 모호하거나 의견에 따라 답이 달라지는 문제, 제목만 보고 맞힐 수 있는 문제는 만들지 마세요.\n9. explanation은 사진이나 확인된 책 내용에 따른 정답 근거를 한두 문장으로 설명하세요.\n10. hint는 정답을 직접 말하지 않고 장면이나 인물을 떠올리게 하는 한 문장으로 쓰세요.\n11. skill은 해당 문제가 확인하는 능력을 12자 이내로 쓰세요.\n\n반드시 아래 JSON만 출력하세요.\n{"title":"확인된 책 제목","author":"확인된 저자 또는 출판사","questions":[{"question":"문제","options":["선택지1","선택지2","선택지3","선택지4"],"answer":0,"hint":"정답을 직접 밝히지 않는 힌트","skill":"확인 능력","explanation":"정답 설명"}]}`;
+    const prompt = `당신은 한국 초등학생을 위한 정확한 독서퀴즈 출제자입니다.\n${reference}\n대상: ${grade}\n문제 수: ${questionCount}\n\n중요 규칙:\n1. 첨부 사진이 있으면 표지에 실제로 적힌 책 제목, 권수, 부제, 저자·기획·출판사를 먼저 정확히 읽으세요. 검색으로 추정한 다른 책 이름으로 바꾸면 안 됩니다.\n2. 첨부 사진이 있으면 사진에 실제로 보이는 글과 장면을 가장 우선적인 근거로 사용하세요. 사진에 없는 내용을 추측하지 마세요.\n3. 사진은 표지, 뒷표지 소개, 본문, 판권 페이지일 수 있습니다. 읽을 수 있는 내용만 사용하고 흐리거나 잘린 부분은 추정하지 마세요.\n4. 사용자가 입력한 책과 사진 속 책이 다르면 사진 속 책을 기준으로 title과 author를 정확히 반환하세요.\n5. 같은 시리즈의 다른 권이나 제목이 비슷한 다른 책, 원작 애니메이션의 다른 회차를 섞지 마세요.\n6. 사진이 없으면 공식 도서 설명과 널리 확인되는 실제 내용만 사용하세요.\n7. 문제 수만큼 정확한 문제를 만들 수 없다면 지어내지 말고 JSON의 error에 “사진이나 공개 정보에서 퀴즈를 만들 만큼 책 내용을 충분히 확인하기 어렵습니다. 뒷표지나 본문을 더 선명하게 촬영해 주세요.”라고 적으세요.\n8. 선택지는 정확히 4개이며 정답은 0부터 3까지의 배열 인덱스입니다.\n9. 모호하거나 의견에 따라 답이 달라지는 문제, 제목만 보고 맞힐 수 있는 문제는 만들지 마세요.\n10. explanation은 사진이나 확인된 책 내용에 따른 정답 근거를 한두 문장으로 설명하세요.\n11. hint는 정답을 직접 말하지 않고 장면이나 인물을 떠올리게 하는 한 문장으로 쓰세요.\n12. skill은 해당 문제가 확인하는 능력을 12자 이내로 쓰세요.\n\n반드시 아래 JSON만 출력하세요.\n{"title":"사진 또는 확인 자료에서 읽은 정확한 책 제목","author":"사진 또는 확인 자료에서 읽은 저자·기획·출판사","questions":[{"question":"문제","options":["선택지1","선택지2","선택지3","선택지4"],"answer":0,"hint":"정답을 직접 밝히지 않는 힌트","skill":"확인 능력","explanation":"정답 설명"}]}`;
 
     const result = await callGemini({ apiKey, model, prompt, images: safeImages, maxOutputTokens: questionCount === 10 ? 5600 : 3400, temperature: 0.15 });
     const text = result?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
     const parsed = extractJson(text);
     if (parsed.error) return send(res, 422, { message: parsed.error, matchedBook: book });
     const quiz = validateQuiz(parsed, questionCount);
-    return send(res, 200, { ...quiz, title: book.title, author: book.author, grade, matchedBook: book, model, usedPhotos: safeImages.length });
+    const resolvedTitle = safeImages.length && parsed.title?.trim() ? parsed.title.trim() : book.title;
+    const resolvedAuthor = safeImages.length && parsed.author?.trim() ? parsed.author.trim() : book.author;
+    return send(res, 200, { ...quiz, title: resolvedTitle, author: resolvedAuthor, grade, matchedBook: { ...book, title: resolvedTitle, author: resolvedAuthor }, model, usedPhotos: safeImages.length });
   } catch (error) {
     console.error('quiz generation error', error);
     const message = error.message || '퀴즈 생성 중 오류가 발생했습니다.';
     if (/high demand|overloaded|temporarily unavailable/i.test(message)) return send(res, 503, { message: '지금 퀴즈 요청이 많아 잠시 혼잡합니다. 잠시 후 다시 시도해 주세요.' });
     if (/quota exceeded|rate limit|resource_exhausted/i.test(message)) return send(res, 429, { message: '잠시 동안 퀴즈 요청이 많았습니다. 10초 정도 후 다시 시도해 주세요.' });
+    if (/문제 수가 올바르지 않습니다/.test(message)) return send(res, 422, { message: '문제 형식이 정확히 만들어지지 않았습니다. 같은 내용으로 다시 한 번 시도해 주세요.' });
     return send(res, 500, { message });
   }
 }
