@@ -1,9 +1,30 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, BookOpenCheck, CheckCircle2, ChevronLeft, ChevronRight, Lightbulb, LoaderCircle, RefreshCw, RotateCcw, Sparkles, XCircle } from 'lucide-react';
+import { ArrowLeft, BookOpenCheck, CheckCircle2, ChevronLeft, ChevronRight, Clock3, History, Lightbulb, LoaderCircle, RefreshCw, RotateCcw, Sparkles, Trash2, XCircle } from 'lucide-react';
 import App from './App';
 
 const GRADES = ['유치원', '초등 1학년', '초등 2학년', '초등 3학년', '초등 4학년', '초등 5학년', '초등 6학년'];
 const COUNTS = [3, 5, 10];
+const HISTORY_KEY = 'suggestbook-quiz-history-v1';
+
+function loadHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function formatDate(value) {
+  return new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+}
+
+function getMessage(score, total) {
+  const ratio = score / total;
+  if (ratio === 1) return '완벽해요! 책의 내용을 아주 정확하게 기억하고 있어요.';
+  if (ratio >= 0.8) return '아주 잘했어요! 중요한 장면과 인물을 잘 이해했어요.';
+  if (ratio >= 0.6) return '실력이 점점 늘고 있어요. 틀린 부분만 다시 살펴보세요.';
+  return '괜찮아요. 책의 주요 장면을 다시 떠올리면 다음에는 더 잘할 수 있어요.';
+}
 
 function QuizPage({ onBack }) {
   const [form, setForm] = useState({ grade: '초등 1학년', title: '', author: '', count: 3 });
@@ -12,13 +33,29 @@ function QuizPage({ onBack }) {
   const [submitted, setSubmitted] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [hints, setHints] = useState({});
+  const [screen, setScreen] = useState('form');
+  const [history, setHistory] = useState(loadHistory);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const score = useMemo(() => {
-    if (!quiz || !submitted) return 0;
+    if (!quiz) return 0;
     return quiz.questions.reduce((sum, question, index) => sum + (answers[index] === question.answer ? 1 : 0), 0);
-  }, [quiz, answers, submitted]);
+  }, [quiz, answers]);
+
+  const saveResult = () => {
+    const record = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      completedAt: new Date().toISOString(),
+      quiz,
+      answers,
+      score,
+      total: quiz.questions.length,
+    };
+    const next = [record, ...history].slice(0, 50);
+    setHistory(next);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  };
 
   const generateQuiz = async () => {
     if (!form.title.trim() || !form.author.trim()) {
@@ -40,6 +77,7 @@ function QuizPage({ onBack }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || '퀴즈 생성에 실패했어요.');
       setQuiz(data);
+      setScreen('quiz');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       setError(err.message || '잠시 후 다시 시도해 주세요.');
@@ -55,6 +93,7 @@ function QuizPage({ onBack }) {
     setSubmitted(false);
     setCurrentIndex(0);
     setError('');
+    setScreen('form');
   };
 
   const restart = () => {
@@ -62,9 +101,106 @@ function QuizPage({ onBack }) {
     setHints({});
     setSubmitted(false);
     setCurrentIndex(0);
+    setScreen('quiz');
   };
 
-  if (quiz) {
+  const submitQuiz = () => {
+    setSubmitted(true);
+    saveResult();
+    setScreen('result');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const openRecord = (record) => {
+    setQuiz(record.quiz);
+    setForm({ grade: record.quiz.grade, title: record.quiz.title, author: record.quiz.author, count: record.total });
+    setAnswers(record.answers);
+    setSubmitted(true);
+    setHints({});
+    setCurrentIndex(0);
+    setScreen('quiz');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const removeRecord = (id) => {
+    const next = history.filter((item) => item.id !== id);
+    setHistory(next);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  };
+
+  if (screen === 'result' && quiz) {
+    const correctItems = quiz.questions.filter((question, index) => answers[index] === question.answer);
+    const wrongItems = quiz.questions.filter((question, index) => answers[index] !== question.answer);
+    const strengths = [...new Set(correctItems.map((item) => item.skill || '내용 이해'))];
+
+    return (
+      <div className="quiz-page">
+        <header className="quiz-header compact result-heading">
+          <button className="quiz-back" onClick={reset}><ArrowLeft size={18} /> 새 책 입력</button>
+          <p className="section-kicker"><BookOpenCheck size={16} /> {quiz.title}</p>
+          <h1>퀴즈 결과</h1>
+          <p>{quiz.author} · {quiz.grade} · {quiz.questions.length}문제</p>
+        </header>
+        <main className="quiz-main result-page">
+          <section className="result-score-card">
+            <span>점수</span>
+            <div className="score-ring"><strong>{score}/{quiz.questions.length}</strong><small>정답</small></div>
+            <p>{getMessage(score, quiz.questions.length)}</p>
+          </section>
+
+          <section className="result-analysis">
+            <h2>강점</h2>
+            {strengths.length > 0 ? strengths.slice(0, 4).map((skill, index) => (
+              <div className="analysis-item" key={skill}><b>{index + 1}.</b><p><strong>{skill}</strong> 관련 문제를 잘 풀었어요. 책의 중요한 장면과 내용을 정확히 기억하고 있습니다.</p></div>
+            )) : <p className="muted">이번에는 강점보다 복습할 부분을 먼저 찾아보면 좋아요.</p>}
+
+            <h2>중점적으로 살펴볼 영역</h2>
+            {wrongItems.length > 0 ? wrongItems.map((item, index) => (
+              <div className="analysis-item" key={`${item.question}-${index}`}><b>{index + 1}.</b><p><strong>{item.skill || '내용 이해'}:</strong> “{item.question}”과 관련된 장면을 책에서 다시 확인해 보세요.</p></div>
+            )) : <div className="analysis-item"><b>1.</b><p><strong>생각 넓히기:</strong> 모든 문제를 맞혔어요. 등장인물의 마음이나 이야기의 핵심 메시지를 가족과 이야기해 보세요.</p></div>}
+          </section>
+
+          <div className="result-actions">
+            <button className="primary" onClick={() => { setCurrentIndex(0); setScreen('quiz'); }}><BookOpenCheck size={17} /> 문제와 정답 다시보기</button>
+            <button className="secondary" onClick={restart}><RotateCcw size={17} /> 다시 풀기</button>
+          </div>
+
+          <section className="regenerate-panel">
+            <p>문제에 오류가 있을 수 있습니다. 문제가 이상하다면 다시 출제 버튼을 눌러 새롭게 문제를 생성하세요.</p>
+            <button className="secondary" onClick={generateQuiz} disabled={loading}><RefreshCw size={17} /> 문제 다시 출제하기</button>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
+  if (screen === 'history') {
+    return (
+      <div className="quiz-page">
+        <header className="quiz-header compact">
+          <button className="quiz-back" onClick={() => setScreen('form')}><ArrowLeft size={18} /> 독서퀴즈로</button>
+          <p className="section-kicker"><History size={16} /> 퀴즈 기록</p>
+          <h1>읽었던 책과<br />퀴즈 결과</h1>
+          <p>문제, 내가 고른 답, 정답과 해설을 다시 볼 수 있습니다.</p>
+        </header>
+        <main className="quiz-main">
+          {history.length === 0 ? <section className="history-empty"><History size={30} /><h2>아직 저장된 기록이 없어요</h2><p>퀴즈를 끝까지 풀면 이곳에 자동으로 저장됩니다.</p></section> : (
+            <section className="history-list">
+              {history.map((record) => (
+                <article className="history-card" key={record.id}>
+                  <div><span>{record.quiz.grade}</span><h2>{record.quiz.title}</h2><p>{record.quiz.author}</p><small><Clock3 size={13} /> {formatDate(record.completedAt)}</small></div>
+                  <strong>{record.score}/{record.total}</strong>
+                  <div className="history-actions"><button onClick={() => openRecord(record)}>다시 보기</button><button aria-label="기록 삭제" onClick={() => removeRecord(record.id)}><Trash2 size={17} /></button></div>
+                </article>
+              ))}
+            </section>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  if (screen === 'quiz' && quiz) {
     const question = quiz.questions[currentIndex];
     const isCorrect = submitted && answers[currentIndex] === question.answer;
     const isLast = currentIndex === quiz.questions.length - 1;
@@ -79,58 +215,32 @@ function QuizPage({ onBack }) {
         </header>
 
         <main className="quiz-main">
-          {submitted && (
-            <section className="score-card">
-              <strong>{score}/{quiz.questions.length}</strong>
-              <span>{score === quiz.questions.length ? '완벽해요! 책의 내용을 아주 잘 기억하고 있어요.' : '잘했어요! 틀린 문제를 책에서 다시 찾아보세요.'}</span>
-            </section>
-          )}
-
           <div className="quiz-progress"><span>{currentIndex + 1} / {quiz.questions.length}</span><div><i style={{ width: `${((currentIndex + 1) / quiz.questions.length) * 100}%` }} /></div></div>
 
           <article className={`question-card single ${submitted ? (isCorrect ? 'correct' : 'wrong') : ''}`}>
             <div className="question-number">문제 {String(currentIndex + 1).padStart(2, '0')}</div>
             <h2>{question.question}</h2>
-
-            <button className="hint-button" onClick={() => setHints((prev) => ({ ...prev, [currentIndex]: !prev[currentIndex] }))}>
-              <Lightbulb size={17} /> {hints[currentIndex] ? '힌트 숨기기' : '힌트 보기'}
-            </button>
-            {hints[currentIndex] && <div className="hint-box"><Lightbulb size={18} /><span>{question.hint}</span></div>}
-
+            {!submitted && <>
+              <button className="hint-button" onClick={() => setHints((prev) => ({ ...prev, [currentIndex]: !prev[currentIndex] }))}><Lightbulb size={17} /> {hints[currentIndex] ? '힌트 숨기기' : '힌트 보기'}</button>
+              {hints[currentIndex] && <div className="hint-box"><Lightbulb size={18} /><span>{question.hint}</span></div>}
+            </>}
             <div className="options-list">
               {question.options.map((option, optionIndex) => (
-                <button
-                  key={option}
-                  className={answers[currentIndex] === optionIndex ? 'selected' : ''}
-                  onClick={() => !submitted && setAnswers((prev) => ({ ...prev, [currentIndex]: optionIndex }))}
-                  disabled={submitted}
-                >
+                <button key={option} className={`${answers[currentIndex] === optionIndex ? 'selected' : ''} ${submitted && optionIndex === question.answer ? 'correct-option' : ''}`} onClick={() => !submitted && setAnswers((prev) => ({ ...prev, [currentIndex]: optionIndex }))} disabled={submitted}>
                   <span>{optionIndex + 1}</span>{option}
                 </button>
               ))}
             </div>
-
-            {submitted && (
-              <div className="answer-feedback">
-                {isCorrect ? <CheckCircle2 size={19} /> : <XCircle size={19} />}
-                <div><strong>{isCorrect ? '정답이에요' : `정답은 ${question.answer + 1}번이에요`}</strong><p>{question.explanation}</p></div>
-              </div>
-            )}
+            {submitted && <div className="answer-feedback">{isCorrect ? <CheckCircle2 size={19} /> : <XCircle size={19} />}<div><strong>{isCorrect ? '정답이에요' : `정답은 ${question.answer + 1}번이에요`}</strong><p>{question.explanation}</p></div></div>}
           </article>
 
           <div className="question-navigation">
             <button className="secondary" disabled={currentIndex === 0} onClick={() => setCurrentIndex((value) => value - 1)}><ChevronLeft size={17} /> 이전</button>
-            {!submitted && isLast ? (
-              <button className="primary" disabled={Object.keys(answers).length !== quiz.questions.length} onClick={() => { setSubmitted(true); setCurrentIndex(0); }}>채점하기</button>
-            ) : (
-              <button className="primary" disabled={isLast || (!submitted && answers[currentIndex] === undefined)} onClick={() => setCurrentIndex((value) => value + 1)}>다음 <ChevronRight size={17} /></button>
-            )}
+            {!submitted && isLast ? <button className="primary" disabled={Object.keys(answers).length !== quiz.questions.length} onClick={submitQuiz}>채점하기</button> : <button className="primary" disabled={isLast || (!submitted && answers[currentIndex] === undefined)} onClick={() => setCurrentIndex((value) => value + 1)}>다음 <ChevronRight size={17} /></button>}
           </div>
 
-          <div className="quiz-bottom-actions">
-            {submitted && <button className="secondary" onClick={restart}><RotateCcw size={17} /> 다시 풀기</button>}
-            <button className="secondary" onClick={generateQuiz} disabled={loading}><RefreshCw size={17} /> 문제 다시 출제하기</button>
-          </div>
+          {submitted && <button className="result-return-button" onClick={() => setScreen('result')}>결과 화면으로 돌아가기</button>}
+          <section className="regenerate-panel compact-panel"><p>문제에 오류가 있을 수 있습니다. 문제가 이상하다면 다시 출제 버튼을 눌러 새롭게 문제를 생성하세요.</p><button className="secondary" onClick={generateQuiz} disabled={loading}><RefreshCw size={17} /> 문제 다시 출제하기</button></section>
           {error && <p className="quiz-error">{error}</p>}
         </main>
       </div>
@@ -147,6 +257,7 @@ function QuizPage({ onBack }) {
       </header>
 
       <main className="quiz-main">
+        <div className="quiz-start-actions"><button className="history-open-button" onClick={() => setScreen('history')}><History size={17} /> 저장된 퀴즈 기록 <span>{history.length}</span></button></div>
         <section className="quiz-form-card">
           <label><span>학년</span><select value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })}>{GRADES.map((grade) => <option key={grade}>{grade}</option>)}</select></label>
           <label><span>책 이름</span><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="예: 이상한 엄마" /></label>
