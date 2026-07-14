@@ -48,11 +48,8 @@ function validateQuiz(data, expectedCount) {
   return data;
 }
 
-function normalizeModel(value) {
-  let model = (value || 'gemini-3.5-flash').trim();
-  if (model.startsWith('emini-')) model = `g${model}`;
-  if (['gemini-2.5-flash-lite', 'gemini-3.1-flash-lite'].includes(model)) model = 'gemini-3.5-flash';
-  return model;
+function normalizeModel() {
+  return 'gemini-3.1-flash-lite';
 }
 
 function parseImage(dataUrl) {
@@ -149,7 +146,7 @@ async function resolveBook({ apiKey, model, title, identity }) {
 
 export default async function handler(req, res) {
   const apiKey = process.env.GEMINI_API_KEY;
-  const model = normalizeModel(process.env.GEMINI_QUIZ_MODEL);
+  const model = normalizeModel();
 
   if (req.method === 'GET' && req.query?.models === '1') {
     if (!apiKey) return send(res, 503, { ok: false, configured: false, message: 'GEMINI_API_KEY가 없습니다.' });
