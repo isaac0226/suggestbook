@@ -20,7 +20,7 @@ function QuizPage({ onBack }) {
 
   const generateQuiz = async () => {
     if (!form.title.trim() || !form.author.trim()) {
-      setError('책 이름과 저자를 모두 입력해 주세요.');
+      setError('책 이름과 저자·옮긴이·출판사 중 하나를 입력해 주세요.');
       return;
     }
     setLoading(true);
@@ -119,14 +119,14 @@ function QuizPage({ onBack }) {
         <button className="quiz-back" onClick={onBack}><ArrowLeft size={18} /> 추천도서로</button>
         <div className="eyebrow"><Sparkles size={15} /> 읽고 나서 기억을 꺼내보는 시간</div>
         <h1>책 한 권,<br /><span>퀴즈로 한 번 더</span></h1>
-        <p>학년과 책 이름, 저자만 입력하면 아이 수준에 맞는 객관식 독서퀴즈를 만들어 줍니다.</p>
+        <p>학년과 책 이름, 저자 정보를 입력하면 아이 수준에 맞는 객관식 독서퀴즈를 만들어 줍니다. 저자를 모르면 옮긴이나 출판사를 적어도 됩니다.</p>
       </header>
 
       <main className="quiz-main">
         <section className="quiz-form-card">
           <label><span>학년</span><select value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })}>{GRADES.map((grade) => <option key={grade}>{grade}</option>)}</select></label>
           <label><span>책 이름</span><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="예: 이상한 엄마" /></label>
-          <label><span>저자</span><input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} placeholder="예: 백희나" /></label>
+          <label><span>저자·옮긴이·출판사</span><input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} placeholder="예: 백희나 / 김○○ 옮김 / ○○출판사" /></label>
           <fieldset><legend>문제 수</legend><div className="count-options">{COUNTS.map((count) => <button type="button" className={form.count === count ? 'active' : ''} key={count} onClick={() => setForm({ ...form, count })}>{count}문제</button>)}</div></fieldset>
           <button className="primary generate-button" onClick={generateQuiz} disabled={loading}>{loading ? <><LoaderCircle className="spin" size={18} /> 문제 만드는 중…</> : <><BookOpenCheck size={18} /> 퀴즈 만들기</>}</button>
           {error && <p className="quiz-error">{error}</p>}
