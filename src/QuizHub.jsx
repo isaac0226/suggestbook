@@ -51,6 +51,7 @@ function QuizPage({ onBack }) {
   const [supportPhotos, setSupportPhotos] = useState([]);
   const [quiz, setQuiz] = useState(null);
   const [answers, setAnswers] = useState({});
+  const [revealed, setRevealed] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [hints, setHints] = useState({});
@@ -112,6 +113,7 @@ function QuizPage({ onBack }) {
     setError('');
     setSubmitted(false);
     setAnswers({});
+    setRevealed({});
     setHints({});
     setCurrentIndex(0);
     try {
@@ -135,16 +137,22 @@ function QuizPage({ onBack }) {
   };
 
   const reset = () => {
-    setQuiz(null); setAnswers({}); setHints({}); setSubmitted(false); setCurrentIndex(0); setError(''); setCoverPhoto(null); setSupportPhotos([]); setScreen('form');
+    setQuiz(null); setAnswers({}); setRevealed({}); setHints({}); setSubmitted(false); setCurrentIndex(0); setError(''); setCoverPhoto(null); setSupportPhotos([]); setScreen('form');
   };
 
-  const restart = () => { setAnswers({}); setHints({}); setSubmitted(false); setCurrentIndex(0); setScreen('quiz'); };
+  const restart = () => { setAnswers({}); setRevealed({}); setHints({}); setSubmitted(false); setCurrentIndex(0); setScreen('quiz'); };
   const submitQuiz = () => { setSubmitted(true); saveResult(); setScreen('result'); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+
+  const chooseAnswer = (optionIndex) => {
+    if (submitted || revealed[currentIndex]) return;
+    setAnswers((prev) => ({ ...prev, [currentIndex]: optionIndex }));
+    setRevealed((prev) => ({ ...prev, [currentIndex]: true }));
+  };
 
   const openRecord = (record) => {
     setQuiz(record.quiz);
     setForm({ grade: record.quiz.grade, title: record.quiz.title, author: record.quiz.author, count: record.total });
-    setCoverPhoto(null); setSupportPhotos([]); setAnswers(record.answers); setSubmitted(true); setHints({}); setCurrentIndex(0); setScreen('quiz');
+    setCoverPhoto(null); setSupportPhotos([]); setAnswers(record.answers); setRevealed({}); setSubmitted(true); setHints({}); setCurrentIndex(0); setScreen('quiz');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -175,13 +183,14 @@ function QuizPage({ onBack }) {
 
   if (screen === 'quiz' && quiz) {
     const question = quiz.questions[currentIndex];
-    const isCorrect = submitted && answers[currentIndex] === question.answer;
+    const isRevealed = submitted || Boolean(revealed[currentIndex]);
+    const isCorrect = isRevealed && answers[currentIndex] === question.answer;
     const isLast = currentIndex === quiz.questions.length - 1;
     return <div className="quiz-page">
       <header className="quiz-header compact"><button className="quiz-back" onClick={reset}><ArrowLeft size={18} /> 새 책 입력</button><p className="section-kicker"><BookOpenCheck size={16} /> 독서퀴즈</p><h1>{quiz.title}</h1><p>{quiz.author} · {quiz.grade} · {quiz.questions.length}문제</p></header>
       <main className="quiz-main"><div className="quiz-progress"><span>{currentIndex + 1} / {quiz.questions.length}</span><div><i style={{ width: `${((currentIndex + 1) / quiz.questions.length) * 100}%` }} /></div></div>
-        <article className={`question-card single ${submitted ? (isCorrect ? 'correct' : 'wrong') : ''}`}><div className="question-number">문제 {String(currentIndex + 1).padStart(2, '0')}</div><h2>{question.question}</h2>{!submitted && <><button className="hint-button" onClick={() => setHints((prev) => ({ ...prev, [currentIndex]: !prev[currentIndex] }))}><Lightbulb size={17} /> {hints[currentIndex] ? '힌트 숨기기' : '힌트 보기'}</button>{hints[currentIndex] && <div className="hint-box"><Lightbulb size={18} /><span>{question.hint}</span></div>}</>}<div className="options-list">{question.options.map((option, optionIndex) => <button key={`${option}-${optionIndex}`} className={`${answers[currentIndex] === optionIndex ? 'selected' : ''} ${submitted && optionIndex === question.answer ? 'correct-option' : ''}`} onClick={() => !submitted && setAnswers((prev) => ({ ...prev, [currentIndex]: optionIndex }))} disabled={submitted}><span>{optionIndex + 1}</span>{option}</button>)}</div>{submitted && <div className="answer-feedback">{isCorrect ? <CheckCircle2 size={19} /> : <XCircle size={19} />}<div><strong>{isCorrect ? '정답이에요' : `정답은 ${question.answer + 1}번이에요`}</strong><p>{question.explanation}</p></div></div>}</article>
-        <div className="question-navigation"><button className="secondary" disabled={currentIndex === 0} onClick={() => setCurrentIndex((value) => value - 1)}><ChevronLeft size={17} /> 이전</button>{!submitted && isLast ? <button className="primary" disabled={Object.keys(answers).length !== quiz.questions.length} onClick={submitQuiz}>채점하기</button> : <button className="primary" disabled={isLast || (!submitted && answers[currentIndex] === undefined)} onClick={() => setCurrentIndex((value) => value + 1)}>다음 <ChevronRight size={17} /></button>}</div>
+        <article className={`question-card single ${isRevealed ? (isCorrect ? 'correct' : 'wrong') : ''}`}><div className="question-number">문제 {String(currentIndex + 1).padStart(2, '0')}</div><h2>{question.question}</h2>{!isRevealed && <><button className="hint-button" onClick={() => setHints((prev) => ({ ...prev, [currentIndex]: !prev[currentIndex] }))}><Lightbulb size={17} /> {hints[currentIndex] ? '힌트 숨기기' : '힌트 보기'}</button>{hints[currentIndex] && <div className="hint-box"><Lightbulb size={18} /><span>{question.hint}</span></div>}</>}<div className="options-list">{question.options.map((option, optionIndex) => <button key={`${option}-${optionIndex}`} className={`${answers[currentIndex] === optionIndex ? 'selected' : ''} ${isRevealed && optionIndex === question.answer ? 'correct-option' : ''} ${isRevealed && answers[currentIndex] === optionIndex && optionIndex !== question.answer ? 'wrong-option' : ''}`} onClick={() => chooseAnswer(optionIndex)} disabled={isRevealed}><span>{optionIndex + 1}</span>{option}</button>)}</div>{isRevealed && <div className="answer-feedback">{isCorrect ? <CheckCircle2 size={19} /> : <XCircle size={19} />}<div><strong>{isCorrect ? '정답이에요!' : `아쉬워요. 정답은 ${question.answer + 1}번, “${question.options[question.answer]}”이에요.`}</strong><p>{question.explanation || question.evidence}</p></div></div>}</article>
+        <div className="question-navigation"><button className="secondary" disabled={currentIndex === 0} onClick={() => setCurrentIndex((value) => value - 1)}><ChevronLeft size={17} /> 이전</button>{!submitted && isLast ? <button className="primary" disabled={!isRevealed} onClick={submitQuiz}>결과 보기</button> : <button className="primary" disabled={isLast || (!submitted && !isRevealed)} onClick={() => setCurrentIndex((value) => value + 1)}>다음 <ChevronRight size={17} /></button>}</div>
         {submitted && <button className="result-return-button" onClick={() => setScreen('result')}>결과 화면으로 돌아가기</button>}
         <section className="regenerate-panel compact-panel"><p>문제에 오류가 있을 수 있습니다. 문제가 이상하다면 다시 출제 버튼을 눌러 새롭게 문제를 생성하세요.</p><button className="secondary" onClick={generateQuiz} disabled={loading}><RefreshCw size={17} /> 문제 다시 출제하기</button></section>{error && <p className="quiz-error">{error}</p>}
       </main>
