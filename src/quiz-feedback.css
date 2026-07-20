@@ -1,0 +1,63 @@
+/* 즉시 채점 상태를 초등학생도 한눈에 구분할 수 있도록 강한 대비를 줍니다. */
+.question-card.wrong {
+  border-color: #d4473f !important;
+  background: #fff8f7;
+  box-shadow: 0 10px 28px rgba(180, 48, 40, 0.12);
+}
+
+.question-card.correct {
+  border-color: #4f8a45 !important;
+  background: #f7fcf4;
+}
+
+.question-card.wrong .options-list button.selected:not(.correct-option) {
+  border: 2px solid #cf3f37 !important;
+  background: #ffe2df !important;
+  color: #84251f !important;
+  box-shadow: inset 0 0 0 1px rgba(207, 63, 55, 0.08);
+}
+
+.question-card.wrong .options-list button.selected:not(.correct-option) > span {
+  background: #c9362f !important;
+  color: #fff !important;
+}
+
+.options-list button.correct-option {
+  border: 2px solid #43863a !important;
+  background: #dff3d7 !important;
+  color: #245b20 !important;
+}
+
+.options-list button.correct-option > span {
+  background: #3f8137 !important;
+  color: #fff !important;
+}
+
+.question-card.wrong .answer-feedback {
+  border: 1px solid #e7aaa5;
+  border-radius: 16px;
+  background: #fff0ee;
+  color: #8d2d27;
+  padding: 15px 16px;
+}
+
+.question-card.correct .answer-feedback {
+  border: 1px solid #a8cda1;
+  border-radius: 16px;
+  background: #edf8e9;
+  color: #2f6b2a;
+  padding: 15px 16px;
+}
+
+.question-card.wrong .answer-feedback strong {
+  color: #9f2821;
+}
+
+.question-card.correct .answer-feedback strong {
+  color: #276524;
+}
+
+.answer-feedback p {
+  color: inherit;
+  opacity: 0.9;
+}
