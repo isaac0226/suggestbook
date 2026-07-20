@@ -3,12 +3,12 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "env": {
-    "GEMINI_MODEL": "gemini-3.5-flash"
+    "GEMINI_MODEL": "gemini-3.1-flash-lite"
   },
   "routes": [
     {
       "src": "/api/quiz",
-      "dest": "/api/quiz-photo"
+      "dest": "/api/quiz-stable"
     },
     {
       "handle": "filesystem"
