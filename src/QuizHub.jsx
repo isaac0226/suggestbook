@@ -46,7 +46,7 @@ function compressImage(file) {
 }
 
 function QuizPage({ onBack }) {
-  const [form, setForm] = useState({ grade: '초등 1학년', title: '', author: '', count: 3 });
+  const [form, setForm] = useState({ grade: '초등 1학년', title: '', author: '', illustrator: '', translator: '', publisher: '', count: 3 });
   const [coverPhoto, setCoverPhoto] = useState(null);
   const [supportPhotos, setSupportPhotos] = useState([]);
   const [quiz, setQuiz] = useState(null);
@@ -59,6 +59,7 @@ function QuizPage({ onBack }) {
   const [history, setHistory] = useState(loadHistory);
   const [loading, setLoading] = useState(false);
   const [photoLoading, setPhotoLoading] = useState(false);
+  const [identifying, setIdentifying] = useState(false);
   const [error, setError] = useState('');
 
   const score = useMemo(() => {
@@ -97,6 +98,31 @@ function QuizPage({ onBack }) {
     }
   };
 
+  const identifyFromCover = async () => {
+    if (!coverPhoto) return;
+    setIdentifying(true);
+    setError('');
+    try {
+      const response = await fetch('/api/quiz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'identify', images: [coverPhoto.dataUrl], title: form.title, author: form.author }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || '표지 정보를 읽지 못했어요.');
+      setForm((prev) => ({
+        ...prev,
+        title: data.title || prev.title,
+        author: data.author || prev.author,
+        publisher: data.publisher || prev.publisher,
+      }));
+    } catch (err) {
+      setError(err.message || '표지 정보를 읽지 못했어요.');
+    } finally {
+      setIdentifying(false);
+    }
+  };
+
   const saveResult = () => {
     const record = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, completedAt: new Date().toISOString(), quiz, answers, score, total: quiz.questions.length };
     const next = [record, ...history].slice(0, 50);
@@ -105,8 +131,8 @@ function QuizPage({ onBack }) {
   };
 
   const generateQuiz = async () => {
-    if (!coverPhoto) {
-      setError('책 앞표지를 먼저 촬영해 주세요.');
+    if (!form.title.trim()) {
+      setError('책 제목을 입력해 주세요.');
       return;
     }
     setLoading(true);
@@ -117,8 +143,8 @@ function QuizPage({ onBack }) {
     setHints({});
     setCurrentIndex(0);
     try {
-      const images = [coverPhoto.dataUrl, ...supportPhotos.map((photo) => photo.dataUrl)];
-      const imageRoles = ['front_cover', ...supportPhotos.map(() => 'support')];
+      const images = [coverPhoto?.dataUrl, ...supportPhotos.map((photo) => photo.dataUrl)].filter(Boolean);
+      const imageRoles = [coverPhoto ? 'front_cover' : null, ...supportPhotos.map(() => 'support')].filter(Boolean);
       const response = await fetch('/api/quiz', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -151,7 +177,7 @@ function QuizPage({ onBack }) {
 
   const openRecord = (record) => {
     setQuiz(record.quiz);
-    setForm({ grade: record.quiz.grade, title: record.quiz.title, author: record.quiz.author, count: record.total });
+    setForm((prev) => ({ ...prev, grade: record.quiz.grade, title: record.quiz.title, author: record.quiz.author, count: record.total }));
     setCoverPhoto(null); setSupportPhotos([]); setAnswers(record.answers); setRevealed({}); setSubmitted(true); setHints({}); setCurrentIndex(0); setScreen('quiz');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -171,7 +197,7 @@ function QuizPage({ onBack }) {
         <section className="result-score-card"><span>점수</span><div className="score-ring"><strong>{score}/{quiz.questions.length}</strong><small>정답</small></div><p>{getMessage(score, quiz.questions.length)}</p></section>
         <section className="result-analysis"><h2>강점</h2>{strengths.length ? strengths.slice(0, 4).map((skill, index) => <div className="analysis-item" key={skill}><b>{index + 1}.</b><p><strong>{skill}</strong> 관련 문제를 잘 풀었어요. 책의 중요한 장면과 내용을 정확히 기억하고 있습니다.</p></div>) : <p className="muted">이번에는 강점보다 복습할 부분을 먼저 찾아보면 좋아요.</p>}<h2>중점적으로 살펴볼 영역</h2>{wrongItems.length ? wrongItems.map((item, index) => <div className="analysis-item" key={`${item.question}-${index}`}><b>{index + 1}.</b><p><strong>{item.skill || '내용 이해'}:</strong> “{item.question}”과 관련된 장면을 책에서 다시 확인해 보세요.</p></div>) : <div className="analysis-item"><b>1.</b><p><strong>생각 넓히기:</strong> 모든 문제를 맞혔어요. 등장인물의 마음이나 이야기의 핵심 메시지를 가족과 이야기해 보세요.</p></div>}</section>
         <div className="result-actions"><button className="primary" onClick={() => { setCurrentIndex(0); setScreen('quiz'); }}><BookOpenCheck size={17} /> 문제와 정답 다시보기</button><button className="secondary" onClick={restart}><RotateCcw size={17} /> 다시 풀기</button></div>
-        <section className="regenerate-panel"><p>문제에 오류가 있을 수 있습니다. 문제가 이상하다면 다시 출제 버튼을 눌러 새롭게 문제를 생성하세요.</p><button className="secondary" onClick={generateQuiz} disabled={loading}><RefreshCw size={17} /> 문제 다시 출제하기</button></section>
+        <section className="regenerate-panel"><p>문제가 이상하면 입력한 책 정보를 확인한 뒤 다시 출제해 주세요.</p><button className="secondary" onClick={generateQuiz} disabled={loading}><RefreshCw size={17} /> 문제 다시 출제하기</button></section>
       </main>
     </div>;
   }
@@ -192,19 +218,30 @@ function QuizPage({ onBack }) {
         <article className={`question-card single ${isRevealed ? (isCorrect ? 'correct' : 'wrong') : ''}`}><div className="question-number">문제 {String(currentIndex + 1).padStart(2, '0')}</div><h2>{question.question}</h2>{!isRevealed && <><button className="hint-button" onClick={() => setHints((prev) => ({ ...prev, [currentIndex]: !prev[currentIndex] }))}><Lightbulb size={17} /> {hints[currentIndex] ? '힌트 숨기기' : '힌트 보기'}</button>{hints[currentIndex] && <div className="hint-box"><Lightbulb size={18} /><span>{question.hint}</span></div>}</>}<div className="options-list">{question.options.map((option, optionIndex) => <button key={`${option}-${optionIndex}`} className={`${answers[currentIndex] === optionIndex ? 'selected' : ''} ${isRevealed && optionIndex === question.answer ? 'correct-option' : ''} ${isRevealed && answers[currentIndex] === optionIndex && optionIndex !== question.answer ? 'wrong-option' : ''}`} onClick={() => chooseAnswer(optionIndex)} disabled={isRevealed}><span>{optionIndex + 1}</span>{option}</button>)}</div>{isRevealed && <div className="answer-feedback">{isCorrect ? <CheckCircle2 size={19} /> : <XCircle size={19} />}<div><strong>{isCorrect ? '정답이에요!' : `아쉬워요. 정답은 ${question.answer + 1}번, “${question.options[question.answer]}”이에요.`}</strong><p>{question.explanation || question.evidence}</p></div></div>}</article>
         <div className="question-navigation"><button className="secondary" disabled={currentIndex === 0} onClick={() => setCurrentIndex((value) => value - 1)}><ChevronLeft size={17} /> 이전</button>{!submitted && isLast ? <button className="primary" disabled={!isRevealed} onClick={submitQuiz}>결과 보기</button> : <button className="primary" disabled={isLast || (!submitted && !isRevealed)} onClick={() => setCurrentIndex((value) => value + 1)}>다음 <ChevronRight size={17} /></button>}</div>
         {submitted && <button className="result-return-button" onClick={() => setScreen('result')}>결과 화면으로 돌아가기</button>}
-        <section className="regenerate-panel compact-panel"><p>문제에 오류가 있을 수 있습니다. 문제가 이상하다면 다시 출제 버튼을 눌러 새롭게 문제를 생성하세요.</p><button className="secondary" onClick={generateQuiz} disabled={loading}><RefreshCw size={17} /> 문제 다시 출제하기</button></section>{error && <p className="quiz-error">{error}</p>}
       </main>
     </div>;
   }
 
   return <div className="quiz-page">
-    <header className="quiz-header"><button className="quiz-back" onClick={onBack}><ArrowLeft size={18} /> 추천도서로</button><div className="eyebrow"><Sparkles size={15} /> 책을 찍으면 바로 시작</div><h1>앞표지 한 장으로<br /><span>독서퀴즈 만들기</span></h1><p>앞표지를 찍으면 책 제목과 저자 정보를 읽어 퀴즈를 만듭니다. 뒷표지, 목차나 본문 사진을 더하면 문제 정확도가 높아집니다.</p></header>
+    <header className="quiz-header"><button className="quiz-back" onClick={onBack}><ArrowLeft size={18} /> 추천도서로</button><div className="eyebrow"><Sparkles size={15} /> 책 정보를 입력하면 더 정확하게</div><h1>책 제목으로<br /><span>독서퀴즈 만들기</span></h1><p>책 제목은 필수입니다. 글쓴이·그림 작가·옮긴이·출판사를 함께 입력하면 같은 제목의 다른 책을 피할 수 있어요.</p></header>
     <main className="quiz-main"><div className="quiz-start-actions"><button className="history-open-button" onClick={() => setScreen('history')}><History size={17} /> 저장된 퀴즈 기록 <span>{history.length}</span></button></div>
-      <section className="quiz-form-card"><label><span>학년</span><select value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })}>{GRADES.map((grade) => <option key={grade}>{grade}</option>)}</select></label>
-        <div className={`cover-photo-card ${coverPhoto ? 'has-photo' : ''}`}><div className="cover-photo-heading"><div><strong>앞표지 사진 <em>필수</em></strong><span>책 제목·권수·저자 확인용</span></div><label className="photo-add-button"><Camera size={18} /> {photoLoading ? '준비 중…' : coverPhoto ? '다시 촬영' : '앞표지 촬영'}<input type="file" accept="image/*" capture="environment" disabled={photoLoading} onChange={handleCoverPhoto} /></label></div>{coverPhoto ? <div className="cover-preview"><img src={coverPhoto.dataUrl} alt="책 앞표지" /><button type="button" aria-label="앞표지 사진 삭제" onClick={() => setCoverPhoto(null)}><X size={16} /></button><span>앞표지</span></div> : <div className="cover-photo-guide"><Camera size={28} /><p>책 전체가 화면 안에 들어오고 제목이 선명하게 보이도록 찍어 주세요.</p></div>}</div>
-        <div className="photo-source support-photo-card"><div className="photo-source-heading"><div><strong>내용 참고 사진</strong><span>선택사항 · 최대 {MAX_SUPPORT_PHOTOS}장</span></div><label className={`photo-add-button ${supportPhotos.length >= MAX_SUPPORT_PHOTOS ? 'disabled' : ''}`}><Camera size={18} /> {photoLoading ? '준비 중…' : '추가 촬영'}<input type="file" accept="image/*" capture="environment" multiple disabled={photoLoading || supportPhotos.length >= MAX_SUPPORT_PHOTOS} onChange={handleSupportPhotos} /></label></div><p>뒷표지 책 소개, 목차 또는 중요한 본문을 찍어 주세요. 사진이 없으면 앞표지와 공개된 책 정보를 바탕으로 출제합니다.</p>{supportPhotos.length > 0 && <div className="photo-preview-list">{supportPhotos.map((photo, index) => <div className="photo-preview" key={`${photo.name}-${index}`}><img src={photo.dataUrl} alt={`내용 참고 사진 ${index + 1}`} /><button type="button" aria-label={`추가 사진 ${index + 1} 삭제`} onClick={() => setSupportPhotos((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={15} /></button><span>{index + 1}</span></div>)}</div>}<small>사진은 퀴즈 생성에만 사용하며 퀴즈 기록에는 저장하지 않습니다.</small></div>
-        <details className="manual-book-info"><summary>책 정보를 직접 추가하기 <span>선택사항</span></summary><div><label><span>책 이름</span><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="사진이 흐릴 때만 입력" /></label><label><span>저자·옮긴이·출판사</span><input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} placeholder="알고 있는 정보가 있을 때만 입력" /></label></div></details>
-        <fieldset><legend>문제 수</legend><div className="count-options">{COUNTS.map((count) => <button type="button" className={form.count === count ? 'active' : ''} key={count} onClick={() => setForm({ ...form, count })}>{count}문제</button>)}</div></fieldset><button className="primary generate-button" onClick={generateQuiz} disabled={loading || photoLoading || !coverPhoto}>{loading ? <><LoaderCircle className="spin" size={18} /> 문제 만드는 중…</> : <><BookOpenCheck size={18} /> 퀴즈 만들기</>}</button>{error && <p className="quiz-error">{error}</p>}<p className="quiz-caution">앞표지는 필수이며, 뒷표지·목차·본문 사진은 선택사항입니다.</p>
+      <section className="quiz-form-card">
+        <div className="book-input-grid">
+          <label className="book-title-field"><span>책 제목 <em>필수</em></span><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="예: 눈아이" /></label>
+          <label><span>글쓴이</span><input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} placeholder="예: 안녕달" /></label>
+          <label><span>그림 작가</span><input value={form.illustrator} onChange={(e) => setForm({ ...form, illustrator: e.target.value })} placeholder="해당할 때 입력" /></label>
+          <label><span>옮긴이</span><input value={form.translator} onChange={(e) => setForm({ ...form, translator: e.target.value })} placeholder="번역서일 때 입력" /></label>
+          <label><span>출판사</span><input value={form.publisher} onChange={(e) => setForm({ ...form, publisher: e.target.value })} placeholder="예: 창비" /></label>
+          <label><span>학년</span><select value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })}>{GRADES.map((grade) => <option key={grade}>{grade}</option>)}</select></label>
+        </div>
+
+        <details className="optional-photo-panel"><summary>표지 사진으로 책 정보 불러오기 <span>선택사항</span></summary><div className={`cover-photo-card ${coverPhoto ? 'has-photo' : ''}`}><div className="cover-photo-heading"><div><strong>앞표지 사진</strong><span>사진을 읽어 제목·글쓴이·출판사를 입력칸에 채웁니다.</span></div><label className="photo-add-button"><Camera size={18} /> {photoLoading ? '준비 중…' : coverPhoto ? '다시 촬영' : '앞표지 촬영'}<input type="file" accept="image/*" capture="environment" disabled={photoLoading} onChange={handleCoverPhoto} /></label></div>{coverPhoto ? <><div className="cover-preview"><img src={coverPhoto.dataUrl} alt="책 앞표지" /><button type="button" aria-label="앞표지 사진 삭제" onClick={() => setCoverPhoto(null)}><X size={16} /></button><span>앞표지</span></div><button type="button" className="secondary identify-cover-button" onClick={identifyFromCover} disabled={identifying}>{identifying ? <><LoaderCircle className="spin" size={17} /> 읽는 중…</> : '사진에서 책 정보 채우기'}</button></> : <div className="cover-photo-guide"><Camera size={28} /><p>사진은 선택사항입니다. 읽어 온 정보는 직접 확인하고 수정할 수 있어요.</p></div>}</div></details>
+
+        <div className="photo-source support-photo-card"><div className="photo-source-heading"><div><strong>내용 참고 사진</strong><span>선택사항 · 최대 {MAX_SUPPORT_PHOTOS}장</span></div><label className={`photo-add-button ${supportPhotos.length >= MAX_SUPPORT_PHOTOS ? 'disabled' : ''}`}><Camera size={18} /> {photoLoading ? '준비 중…' : '추가 촬영'}<input type="file" accept="image/*" capture="environment" multiple disabled={photoLoading || supportPhotos.length >= MAX_SUPPORT_PHOTOS} onChange={handleSupportPhotos} /></label></div><p>뒷표지 책 소개, 목차 또는 중요한 본문을 찍으면 내용 문제의 정확도가 높아집니다.</p>{supportPhotos.length > 0 && <div className="photo-preview-list">{supportPhotos.map((photo, index) => <div className="photo-preview" key={`${photo.name}-${index}`}><img src={photo.dataUrl} alt={`내용 참고 사진 ${index + 1}`} /><button type="button" aria-label={`추가 사진 ${index + 1} 삭제`} onClick={() => setSupportPhotos((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={15} /></button><span>{index + 1}</span></div>)}</div>}<small>사진은 퀴즈 생성에만 사용하며 퀴즈 기록에는 저장하지 않습니다.</small></div>
+
+        <fieldset><legend>문제 수</legend><div className="count-options">{COUNTS.map((count) => <button type="button" className={form.count === count ? 'active' : ''} key={count} onClick={() => setForm({ ...form, count })}>{count}문제</button>)}</div></fieldset>
+        <button className="primary generate-button" onClick={generateQuiz} disabled={loading || photoLoading || !form.title.trim()}>{loading ? <><LoaderCircle className="spin" size={18} /> 문제 만드는 중…</> : <><BookOpenCheck size={18} /> 퀴즈 만들기</>}</button>
+        {error && <p className="quiz-error">{error}</p>}<p className="quiz-caution">책 제목은 필수이며, 나머지 정보와 사진은 정확도를 높이는 선택사항입니다.</p>
       </section>
     </main>
   </div>;
