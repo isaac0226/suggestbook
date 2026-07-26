@@ -16,13 +16,13 @@ function extractJson(text) {
 
 function parseImage(dataUrl) {
   if (typeof dataUrl !== 'string') return null;
-  const m = dataUrl.match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=]+)$/i);
-  if (!m) return null;
-  return { inlineData: { mimeType: m[1].toLowerCase().replace('image/jpg', 'image/jpeg'), data: m[2] } };
+  const match = dataUrl.match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) return null;
+  return { inlineData: { mimeType: match[1].toLowerCase().replace('image/jpg', 'image/jpeg'), data: match[2] } };
 }
 
 function geminiText(result) {
-  return result?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
+  return result?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
 }
 
 async function callGemini({ apiKey, model, prompt, images = [], maxOutputTokens = 2048, temperature = 0, schema, googleSearch = false }) {
@@ -46,13 +46,13 @@ async function callGemini({ apiKey, model, prompt, images = [], maxOutputTokens 
 
 async function geminiJsonWithRetry(args, retries = 2) {
   let lastError;
-  for (let i = 0; i <= retries; i += 1) {
+  for (let index = 0; index <= retries; index += 1) {
     try {
-      const result = await callGemini({ ...args, temperature: i === 0 ? (args.temperature ?? 0) : 0.1 });
+      const result = await callGemini({ ...args, temperature: index === 0 ? (args.temperature ?? 0) : 0.1 });
       return extractJson(geminiText(result));
     } catch (error) {
       lastError = error;
-      console.warn('Gemini JSON retry', i + 1, error.message);
+      console.warn('Gemini JSON retry', index + 1, error.message);
     }
   }
   throw lastError;
@@ -65,7 +65,7 @@ async function callKimi({ apiKey, model, prompt, maxTokens }) {
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: '당신은 초등학교 독서 퀴즈 교사입니다. 이야기 속 인물, 행동, 장소, 사건, 느낌만 묻습니다. 수상 경력, 출판 정보, 그림 제작 기법, 작가 경력은 절대 문제로 만들지 않습니다. 제공된 자료만 사용하고 유효한 JSON 객체 하나만 출력하세요.' },
+        { role: 'system', content: '당신은 초등학교 독서 퀴즈 교사입니다. 이야기 속 인물, 행동, 장소, 사건, 느낌만 묻습니다. 10문제일 때 마지막 문제는 정답이 없는 생각 쓰기 문제로 만듭니다. 수상 경력, 출판 정보, 그림 제작 기법, 작가 경력은 절대 문제로 만들지 않습니다. 제공된 자료만 사용하고 유효한 JSON 객체 하나만 출력하세요.' },
         { role: 'user', content: prompt },
       ],
       temperature: 0.05,
@@ -90,20 +90,20 @@ async function identifyCover(apiKey, model, cover, title = '', author = '') {
 
 async function googleBooks(title, people, publisher) {
   try {
-    const q = [title, people, publisher].filter(Boolean).join(' ');
-    const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=10&printType=books`);
+    const query = [title, people, publisher].filter(Boolean).join(' ');
+    const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=10&printType=books`);
     if (!response.ok) return null;
     const data = await response.json();
     const normalized = String(title).replace(/\s/g, '');
-    const item = (data.items || []).find((x) => String(x.volumeInfo?.title || '').replace(/\s/g, '').includes(normalized)) || data.items?.[0];
+    const item = (data.items || []).find((entry) => String(entry.volumeInfo?.title || '').replace(/\s/g, '').includes(normalized)) || data.items?.[0];
     if (!item) return null;
-    const v = item.volumeInfo || {};
+    const info = item.volumeInfo || {};
     return {
-      title: v.title || title,
-      author: (v.authors || []).join(', ') || people,
-      publisher: v.publisher || publisher || '',
-      description: String(v.description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
-      isbn: (v.industryIdentifiers || []).find((x) => x.type === 'ISBN_13')?.identifier || '',
+      title: info.title || title,
+      author: (info.authors || []).join(', ') || people,
+      publisher: info.publisher || publisher || '',
+      description: String(info.description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+      isbn: (info.industryIdentifiers || []).find((entry) => entry.type === 'ISBN_13')?.identifier || '',
     };
   } catch { return null; }
 }
@@ -117,7 +117,7 @@ async function extractPhotoFacts(apiKey, model, images) {
       prompt: '이 사진들은 책의 뒷표지, 목차 또는 본문입니다. 초등학생이 이해할 수 있는 이야기 내용만 뽑으세요. 등장인물, 행동, 장소, 사건, 감정, 원인과 결과를 짧은 문장으로 정리하세요. 수상 정보, 출판 정보, 작가 경력, 그림 제작 기법은 제외하세요. 추측하지 마세요.',
       images, maxOutputTokens: 1800, schema,
     }, 1);
-    return Array.isArray(data.facts) ? data.facts.map(String).filter((x) => x && !FORBIDDEN_META.test(x)).slice(0, 30) : [];
+    return Array.isArray(data.facts) ? data.facts.map(String).filter((fact) => fact && !FORBIDDEN_META.test(fact)).slice(0, 30) : [];
   } catch (error) {
     console.warn('support photo extraction skipped', error.message);
     return [];
@@ -129,7 +129,7 @@ async function researchBook(apiKey, model, book) {
   try {
     const result = await callGemini({ apiKey, model, prompt, maxOutputTokens: 2200, googleSearch: true });
     const data = extractJson(geminiText(result));
-    const facts = Array.isArray(data.facts) ? data.facts.map(String).filter((x) => x && !FORBIDDEN_META.test(x)) : [];
+    const facts = Array.isArray(data.facts) ? data.facts.map(String).filter((fact) => fact && !FORBIDDEN_META.test(fact)) : [];
     return { summary: String(data.summary || ''), facts, confidence: Number(data.confidence || 0) };
   } catch (error) {
     console.warn('book research skipped', error.message);
@@ -139,30 +139,71 @@ async function researchBook(apiKey, model, book) {
 
 function quizSchema(count) {
   return {
-    type: 'OBJECT', properties: {
-      title: { type: 'STRING' }, author: { type: 'STRING' },
-      questions: { type: 'ARRAY', minItems: count, maxItems: count, items: { type: 'OBJECT', properties: {
-        question: { type: 'STRING' }, options: { type: 'ARRAY', minItems: 4, maxItems: 4, items: { type: 'STRING' } },
-        answer: { type: 'INTEGER' }, hint: { type: 'STRING' }, skill: { type: 'STRING' }, explanation: { type: 'STRING' }, evidence: { type: 'STRING' },
-      }, required: ['question','options','answer','hint','skill','explanation','evidence'] } },
-    }, required: ['title','author','questions'],
+    type: 'OBJECT',
+    properties: {
+      title: { type: 'STRING' },
+      author: { type: 'STRING' },
+      questions: {
+        type: 'ARRAY', minItems: count, maxItems: count,
+        items: {
+          type: 'OBJECT',
+          properties: {
+            type: { type: 'STRING' },
+            question: { type: 'STRING' },
+            options: { type: 'ARRAY', minItems: 0, maxItems: 4, items: { type: 'STRING' } },
+            answer: { type: 'INTEGER' },
+            hint: { type: 'STRING' },
+            skill: { type: 'STRING' },
+            explanation: { type: 'STRING' },
+            evidence: { type: 'STRING' },
+          },
+          required: ['type', 'question', 'options', 'answer', 'hint', 'skill', 'explanation', 'evidence'],
+        },
+      },
+    },
+    required: ['title', 'author', 'questions'],
   };
 }
 
-function validateQuiz(data, count) {
+function normalizeQuiz(data, count) {
   if (!Array.isArray(data?.questions) || data.questions.length !== count) throw new Error('문제 수가 올바르지 않습니다.');
+  data.questions = data.questions.map((item, index) => {
+    const shouldBeOpen = count === 10 && index === count - 1;
+    return {
+      ...item,
+      type: shouldBeOpen ? 'open_ended' : 'multiple_choice',
+      options: shouldBeOpen ? [] : item.options,
+      answer: shouldBeOpen ? -1 : item.answer,
+      skill: shouldBeOpen ? '생각 표현' : item.skill,
+    };
+  });
+  return data;
+}
+
+function validateQuiz(raw, count) {
+  const data = normalizeQuiz(raw, count);
   const seen = new Set();
-  for (const item of data.questions) {
-    if (!item.question || !Array.isArray(item.options) || item.options.length !== 4) throw new Error('문제 형식이 올바르지 않습니다.');
-    if (!Number.isInteger(item.answer) || item.answer < 0 || item.answer > 3) throw new Error('정답 형식이 올바르지 않습니다.');
-    if (!item.evidence) throw new Error('문제 근거가 부족합니다.');
-    if (FORBIDDEN_META.test(`${item.question} ${item.options.join(' ')} ${item.explanation || ''}`)) throw new Error('초등학생에게 어려운 책 바깥 정보가 포함되었습니다.');
-    if (String(item.question).length > 50) throw new Error('질문 문장이 너무 깁니다.');
-    if (item.options.some((option) => String(option).length > 24)) throw new Error('보기가 너무 깁니다.');
+  for (let index = 0; index < data.questions.length; index += 1) {
+    const item = data.questions[index];
+    const openEnded = item.type === 'open_ended';
+    if (!item.question) throw new Error('문제 형식이 올바르지 않습니다.');
+    if (openEnded) {
+      if (count !== 10 || index !== count - 1) throw new Error('서술형 문제 위치가 올바르지 않습니다.');
+      if (!Array.isArray(item.options) || item.options.length !== 0 || item.answer !== -1) throw new Error('서술형 문제 형식이 올바르지 않습니다.');
+      if (!/(느낀|생각|나라면|내가|경험|하고 싶은|말해 주고 싶은|어떻게)/.test(item.question)) throw new Error('서술형 문제는 생각을 넓히는 질문이어야 합니다.');
+    } else {
+      if (!Array.isArray(item.options) || item.options.length !== 4) throw new Error('객관식 문제 형식이 올바르지 않습니다.');
+      if (!Number.isInteger(item.answer) || item.answer < 0 || item.answer > 3) throw new Error('정답 형식이 올바르지 않습니다.');
+      if (!item.evidence) throw new Error('문제 근거가 부족합니다.');
+      if (item.options.some((option) => String(option).length > 24)) throw new Error('보기가 너무 깁니다.');
+    }
+    if (FORBIDDEN_META.test(`${item.question} ${(item.options || []).join(' ')} ${item.explanation || ''}`)) throw new Error('초등학생에게 어려운 책 바깥 정보가 포함되었습니다.');
+    if (String(item.question).length > 55) throw new Error('질문 문장이 너무 깁니다.');
     const key = item.question.replace(/\s/g, '');
     if (seen.has(key)) throw new Error('비슷한 문제가 반복되었습니다.');
     seen.add(key);
   }
+  if (count === 10 && data.questions.filter((question) => question.type === 'open_ended').length !== 1) throw new Error('10문제의 마지막은 서술형이어야 합니다.');
   return data;
 }
 
@@ -182,8 +223,7 @@ export default async function handler(req, res) {
   if (action === 'identify') {
     if (!safeImages.length) return send(res, 400, { message: '앞표지 사진을 먼저 추가해 주세요.' });
     try {
-      const identified = await identifyCover(geminiKey, geminiModel, safeImages[0], title, author);
-      return send(res, 200, identified);
+      return send(res, 200, await identifyCover(geminiKey, geminiModel, safeImages[0], title, author));
     } catch (error) {
       console.error('cover identification error', error);
       return send(res, 502, { message: '표지에서 책 정보를 읽지 못했습니다. 직접 입력해 주세요.' });
@@ -201,15 +241,8 @@ export default async function handler(req, res) {
     if (coverIndex >= 0 && safeImages[coverIndex]) {
       try {
         const fromCover = await identifyCover(geminiKey, geminiModel, safeImages[coverIndex], title, author);
-        identified = {
-          title: String(title).trim() || fromCover.title,
-          author: people || fromCover.author,
-          publisher: String(publisher).trim() || fromCover.publisher,
-          confidence: fromCover.confidence,
-        };
-      } catch (error) {
-        console.warn('cover verification skipped', error.message);
-      }
+        identified = { title: String(title).trim() || fromCover.title, author: people || fromCover.author, publisher: String(publisher).trim() || fromCover.publisher, confidence: fromCover.confidence };
+      } catch (error) { console.warn('cover verification skipped', error.message); }
     }
 
     const catalog = await googleBooks(identified.title, identified.author, identified.publisher);
@@ -223,11 +256,8 @@ export default async function handler(req, res) {
     };
 
     const supportImages = safeImages.filter((_, index) => imageRoles[index] !== 'front_cover');
-    const [research, photoFacts] = await Promise.all([
-      researchBook(geminiKey, geminiModel, book),
-      extractPhotoFacts(geminiKey, geminiModel, supportImages),
-    ]);
-    const facts = [...research.facts, ...photoFacts].filter((x) => x && !FORBIDDEN_META.test(x));
+    const [research, photoFacts] = await Promise.all([researchBook(geminiKey, geminiModel, book), extractPhotoFacts(geminiKey, geminiModel, supportImages)]);
+    const facts = [...research.facts, ...photoFacts].filter((fact) => fact && !FORBIDDEN_META.test(fact));
     const reference = [
       `제목: ${book.title}`,
       book.people ? `글·그림·옮긴이: ${book.people}` : '',
@@ -239,7 +269,11 @@ export default async function handler(req, res) {
 
     if (!book.description && facts.length < 3) return send(res, 422, { message: '정확한 내용 문제가 될 자료가 부족합니다. 뒷표지나 본문 사진을 추가해 주세요.', matchedBook: book });
 
-    const prompt = `다음 자료만 사용하여 ${grade} 수준 독서 퀴즈 ${questionCount}개를 만드세요.\n\n반드시 지킬 규칙:\n1. 이야기 안에서 직접 확인되는 인물, 장소, 행동, 사건의 순서, 기분, 쉬운 원인과 결과만 묻습니다.\n2. 수상 경력, 상 이름, 출판사, 출간 연도, 작가 경력, 그림 재료나 제작 기법, 판매 기록은 절대 묻지 않습니다.\n3. 제목·저자·표지 모양을 묻지 않습니다.\n4. 질문은 한 문장으로 짧고 쉽게 씁니다.\n5. 보기 하나는 짧게 쓰고 정확히 4개입니다. 정답은 0부터 3 사이 인덱스입니다.\n6. 쉬운 사실 확인 약 70%, 인물의 기분이나 쉬운 까닭 약 30%로 구성합니다.\n7. 각 문제 evidence에는 이야기 자료에서 확인되는 근거를 씁니다.\n8. 자료에 없는 사실은 추측하지 않습니다.\n\n${reference}\n\nJSON 형식: {"title":"책 제목","author":"저자","questions":[{"question":"질문","options":["보기1","보기2","보기3","보기4"],"answer":0,"hint":"짧은 힌트","skill":"내용 이해","explanation":"쉬운 설명","evidence":"근거"}]}`;
+    const compositionRule = questionCount === 10
+      ? '10문제는 반드시 1~9번 객관식, 10번 서술형으로 구성합니다. 10번은 정답이 없는 생각 쓰기 문제이며, 책을 읽고 느낀 점, 인물에게 해 주고 싶은 말, 내가 같은 상황이라면 어떻게 할지, 내 경험과 연결하기 중 책에 가장 알맞은 한 가지를 묻습니다. 10번의 type은 open_ended, options는 [], answer는 -1로 씁니다.'
+      : `${questionCount}문제는 모두 객관식으로 만들고 type은 multiple_choice로 씁니다.`;
+
+    const prompt = `다음 자료만 사용하여 ${grade} 수준 독서 퀴즈 ${questionCount}개를 만드세요.\n\n반드시 지킬 규칙:\n1. ${compositionRule}\n2. 객관식은 이야기 안에서 직접 확인되는 인물, 장소, 행동, 사건의 순서, 기분, 쉬운 원인과 결과만 묻습니다.\n3. 수상 경력, 상 이름, 출판사, 출간 연도, 작가 경력, 그림 재료나 제작 기법, 판매 기록은 절대 묻지 않습니다.\n4. 제목·저자·표지 모양을 묻지 않습니다.\n5. 질문은 한 문장으로 짧고 쉽게 씁니다.\n6. 객관식 보기는 정확히 4개이고 정답은 0부터 3 사이 인덱스입니다.\n7. 객관식은 쉬운 사실 확인 약 70%, 인물의 기분이나 쉬운 까닭 약 30%로 구성합니다.\n8. 각 객관식 evidence에는 이야기 자료에서 확인되는 근거를 씁니다.\n9. 자료에 없는 사실은 추측하지 않습니다.\n\n${reference}\n\nJSON 형식: {"title":"책 제목","author":"저자","questions":[{"type":"multiple_choice 또는 open_ended","question":"질문","options":["보기1","보기2","보기3","보기4"],"answer":0,"hint":"짧은 힌트","skill":"내용 이해 또는 생각 표현","explanation":"쉬운 설명","evidence":"근거"}]}`;
 
     let quiz;
     let provider = 'kimi';
@@ -247,9 +281,7 @@ export default async function handler(req, res) {
       try {
         const text = await callKimi({ apiKey: kimiKey, model: kimiModel, prompt, maxTokens: questionCount === 10 ? 6000 : 3600 });
         quiz = validateQuiz(extractJson(text), questionCount);
-      } catch (error) {
-        console.warn('Kimi generation failed; falling back to Gemini', error.message);
-      }
+      } catch (error) { console.warn('Kimi generation failed; falling back to Gemini', error.message); }
     }
     if (!quiz) {
       provider = 'gemini_fallback';
@@ -263,7 +295,7 @@ export default async function handler(req, res) {
     const message = error.message || '퀴즈 생성 중 오류가 발생했습니다.';
     if (/insufficient balance|suspended|recharge/i.test(message)) return send(res, 402, { message: 'Kimi 결제 잔액 또는 API 키가 아직 활성화되지 않았습니다. Moonshot 결제 계정과 API 키의 조직이 같은지 확인해 주세요.' });
     if (/quota|rate limit|resource_exhausted/i.test(message)) return send(res, 429, { message: 'API 사용 한도를 확인해 주세요.' });
-    if (/어려운 책 바깥|질문 문장이 너무|보기가 너무/.test(message)) return send(res, 422, { message: '학년에 알맞지 않은 문제가 포함되어 자동으로 제외했습니다. 다시 만들기를 눌러 주세요.' });
+    if (/어려운 책 바깥|질문 문장이 너무|보기가 너무|서술형/.test(message)) return send(res, 422, { message: '학년이나 문제 형식에 알맞지 않은 문제가 포함되어 자동으로 제외했습니다. 다시 만들기를 눌러 주세요.' });
     if (/AI_EMPTY_RESPONSE|AI_JSON_NOT_FOUND|JSON/.test(message)) return send(res, 502, { message: 'AI가 올바른 형식으로 응답하지 않았습니다. 자동 재시도 후에도 실패했습니다.' });
     return send(res, 500, { message });
   }
