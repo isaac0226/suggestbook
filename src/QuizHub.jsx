@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, BookOpenCheck, Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock3, History, Lightbulb, LoaderCircle, RefreshCw, RotateCcw, Sparkles, Trash2, X, XCircle } from 'lucide-react';
+import { ArrowLeft, BookOpenCheck, Camera, ChevronLeft, ChevronRight, Clock3, History, Lightbulb, LoaderCircle, RefreshCw, RotateCcw, Sparkles, Trash2, X } from 'lucide-react';
 import App from './App';
 
 const GRADES = ['유치원', '초등 1학년', '초등 2학년', '초등 3학년', '초등 4학년', '초등 5학년', '초등 6학년'];
@@ -15,7 +15,16 @@ function formatDate(value) {
   return new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 }
 
+function isOpenEnded(question) {
+  return question?.type === 'open_ended';
+}
+
+function getObjectiveQuestions(quiz) {
+  return quiz?.questions?.filter((question) => !isOpenEnded(question)) || [];
+}
+
 function getMessage(score, total) {
+  if (!total) return '생각을 글로 잘 표현했어요.';
   const ratio = score / total;
   if (ratio === 1) return '완벽해요! 책의 내용을 아주 정확하게 기억하고 있어요.';
   if (ratio >= 0.8) return '아주 잘했어요! 중요한 장면과 인물을 잘 이해했어요.';
@@ -51,7 +60,6 @@ function QuizPage({ onBack }) {
   const [supportPhotos, setSupportPhotos] = useState([]);
   const [quiz, setQuiz] = useState(null);
   const [answers, setAnswers] = useState({});
-  const [revealed, setRevealed] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [hints, setHints] = useState({});
@@ -62,9 +70,13 @@ function QuizPage({ onBack }) {
   const [identifying, setIdentifying] = useState(false);
   const [error, setError] = useState('');
 
+  const objectiveTotal = useMemo(() => getObjectiveQuestions(quiz).length, [quiz]);
   const score = useMemo(() => {
     if (!quiz) return 0;
-    return quiz.questions.reduce((sum, question, index) => sum + (answers[index] === question.answer ? 1 : 0), 0);
+    return quiz.questions.reduce((sum, question, index) => {
+      if (isOpenEnded(question)) return sum;
+      return sum + (answers[index] === question.answer ? 1 : 0);
+    }, 0);
   }, [quiz, answers]);
 
   const handleCoverPhoto = async (event) => {
@@ -110,12 +122,7 @@ function QuizPage({ onBack }) {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || '표지 정보를 읽지 못했어요.');
-      setForm((prev) => ({
-        ...prev,
-        title: data.title || prev.title,
-        author: data.author || prev.author,
-        publisher: data.publisher || prev.publisher,
-      }));
+      setForm((prev) => ({ ...prev, title: data.title || prev.title, author: data.author || prev.author, publisher: data.publisher || prev.publisher }));
     } catch (err) {
       setError(err.message || '표지 정보를 읽지 못했어요.');
     } finally {
@@ -124,7 +131,7 @@ function QuizPage({ onBack }) {
   };
 
   const saveResult = () => {
-    const record = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, completedAt: new Date().toISOString(), quiz, answers, score, total: quiz.questions.length };
+    const record = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, completedAt: new Date().toISOString(), quiz, answers, score, total: objectiveTotal };
     const next = [record, ...history].slice(0, 50);
     setHistory(next);
     localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
@@ -139,7 +146,6 @@ function QuizPage({ onBack }) {
     setError('');
     setSubmitted(false);
     setAnswers({});
-    setRevealed({});
     setHints({});
     setCurrentIndex(0);
     try {
@@ -163,22 +169,21 @@ function QuizPage({ onBack }) {
   };
 
   const reset = () => {
-    setQuiz(null); setAnswers({}); setRevealed({}); setHints({}); setSubmitted(false); setCurrentIndex(0); setError(''); setCoverPhoto(null); setSupportPhotos([]); setScreen('form');
+    setQuiz(null); setAnswers({}); setHints({}); setSubmitted(false); setCurrentIndex(0); setError(''); setCoverPhoto(null); setSupportPhotos([]); setScreen('form');
   };
 
-  const restart = () => { setAnswers({}); setRevealed({}); setHints({}); setSubmitted(false); setCurrentIndex(0); setScreen('quiz'); };
+  const restart = () => { setAnswers({}); setHints({}); setSubmitted(false); setCurrentIndex(0); setScreen('quiz'); };
   const submitQuiz = () => { setSubmitted(true); saveResult(); setScreen('result'); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 
-  const chooseAnswer = (optionIndex) => {
-    if (submitted || revealed[currentIndex]) return;
-    setAnswers((prev) => ({ ...prev, [currentIndex]: optionIndex }));
-    setRevealed((prev) => ({ ...prev, [currentIndex]: true }));
+  const chooseAnswer = (value) => {
+    if (submitted) return;
+    setAnswers((prev) => ({ ...prev, [currentIndex]: value }));
   };
 
   const openRecord = (record) => {
     setQuiz(record.quiz);
-    setForm((prev) => ({ ...prev, grade: record.quiz.grade, title: record.quiz.title, author: record.quiz.author, count: record.total }));
-    setCoverPhoto(null); setSupportPhotos([]); setAnswers(record.answers); setRevealed({}); setSubmitted(true); setHints({}); setCurrentIndex(0); setScreen('quiz');
+    setForm((prev) => ({ ...prev, grade: record.quiz.grade, title: record.quiz.title, author: record.quiz.author, count: record.quiz.questions.length }));
+    setCoverPhoto(null); setSupportPhotos([]); setAnswers(record.answers); setSubmitted(true); setHints({}); setCurrentIndex(0); setScreen('quiz');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -188,14 +193,17 @@ function QuizPage({ onBack }) {
   };
 
   if (screen === 'result' && quiz) {
-    const correctItems = quiz.questions.filter((question, index) => answers[index] === question.answer);
-    const wrongItems = quiz.questions.filter((question, index) => answers[index] !== question.answer);
-    const strengths = [...new Set(correctItems.map((item) => item.skill || '내용 이해'))];
+    const objectiveEntries = quiz.questions.map((question, index) => ({ question, index })).filter(({ question }) => !isOpenEnded(question));
+    const correctItems = objectiveEntries.filter(({ question, index }) => answers[index] === question.answer);
+    const wrongItems = objectiveEntries.filter(({ question, index }) => answers[index] !== question.answer);
+    const reflectionEntry = quiz.questions.map((question, index) => ({ question, index })).find(({ question }) => isOpenEnded(question));
+    const strengths = [...new Set(correctItems.map(({ question }) => question.skill || '내용 이해'))];
     return <div className="quiz-page">
       <header className="quiz-header compact result-heading"><button className="quiz-back" onClick={reset}><ArrowLeft size={18} /> 새 책 입력</button><p className="section-kicker"><BookOpenCheck size={16} /> {quiz.title}</p><h1>퀴즈 결과</h1><p>{quiz.author} · {quiz.grade} · {quiz.questions.length}문제</p></header>
       <main className="quiz-main result-page">
-        <section className="result-score-card"><span>점수</span><div className="score-ring"><strong>{score}/{quiz.questions.length}</strong><small>정답</small></div><p>{getMessage(score, quiz.questions.length)}</p></section>
-        <section className="result-analysis"><h2>강점</h2>{strengths.length ? strengths.slice(0, 4).map((skill, index) => <div className="analysis-item" key={skill}><b>{index + 1}.</b><p><strong>{skill}</strong> 관련 문제를 잘 풀었어요. 책의 중요한 장면과 내용을 정확히 기억하고 있습니다.</p></div>) : <p className="muted">이번에는 강점보다 복습할 부분을 먼저 찾아보면 좋아요.</p>}<h2>중점적으로 살펴볼 영역</h2>{wrongItems.length ? wrongItems.map((item, index) => <div className="analysis-item" key={`${item.question}-${index}`}><b>{index + 1}.</b><p><strong>{item.skill || '내용 이해'}:</strong> “{item.question}”과 관련된 장면을 책에서 다시 확인해 보세요.</p></div>) : <div className="analysis-item"><b>1.</b><p><strong>생각 넓히기:</strong> 모든 문제를 맞혔어요. 등장인물의 마음이나 이야기의 핵심 메시지를 가족과 이야기해 보세요.</p></div>}</section>
+        <section className="result-score-card"><span>객관식 점수</span><div className="score-ring"><strong>{score}/{objectiveTotal}</strong><small>정답</small></div><p>{getMessage(score, objectiveTotal)}</p></section>
+        {reflectionEntry && <section className="reflection-result"><h2>내 생각 쓰기</h2><p className="reflection-question">{reflectionEntry.question.question}</p><div className="reflection-answer">{answers[reflectionEntry.index] || '작성한 답이 없습니다.'}</div><small>서술형은 정답을 매기지 않고 자신의 생각을 표현하는 문제예요.</small></section>}
+        <section className="result-analysis"><h2>강점</h2>{strengths.length ? strengths.slice(0, 4).map((skill, index) => <div className="analysis-item" key={skill}><b>{index + 1}.</b><p><strong>{skill}</strong> 관련 문제를 잘 풀었어요. 책의 중요한 장면과 내용을 정확히 기억하고 있습니다.</p></div>) : <p className="muted">이번에는 강점보다 복습할 부분을 먼저 찾아보면 좋아요.</p>}<h2>중점적으로 살펴볼 영역</h2>{wrongItems.length ? wrongItems.map(({ question }, index) => <div className="analysis-item" key={`${question.question}-${index}`}><b>{index + 1}.</b><p><strong>{question.skill || '내용 이해'}:</strong> “{question.question}”과 관련된 장면을 책에서 다시 확인해 보세요.</p></div>) : <div className="analysis-item"><b>1.</b><p><strong>생각 넓히기:</strong> 객관식 문제를 모두 맞혔어요. 서술형 답을 가족과 함께 이야기해 보세요.</p></div>}</section>
         <div className="result-actions"><button className="primary" onClick={() => { setCurrentIndex(0); setScreen('quiz'); }}><BookOpenCheck size={17} /> 문제와 정답 다시보기</button><button className="secondary" onClick={restart}><RotateCcw size={17} /> 다시 풀기</button></div>
         <section className="regenerate-panel"><p>문제가 이상하면 입력한 책 정보를 확인한 뒤 다시 출제해 주세요.</p><button className="secondary" onClick={generateQuiz} disabled={loading}><RefreshCw size={17} /> 문제 다시 출제하기</button></section>
       </main>
@@ -209,14 +217,21 @@ function QuizPage({ onBack }) {
 
   if (screen === 'quiz' && quiz) {
     const question = quiz.questions[currentIndex];
-    const isRevealed = submitted || Boolean(revealed[currentIndex]);
-    const isCorrect = isRevealed && answers[currentIndex] === question.answer;
+    const openEnded = isOpenEnded(question);
     const isLast = currentIndex === quiz.questions.length - 1;
+    const hasAnswer = openEnded ? Boolean(String(answers[currentIndex] || '').trim()) : Number.isInteger(answers[currentIndex]);
+    const isCorrect = submitted && !openEnded && answers[currentIndex] === question.answer;
     return <div className="quiz-page">
       <header className="quiz-header compact"><button className="quiz-back" onClick={reset}><ArrowLeft size={18} /> 새 책 입력</button><p className="section-kicker"><BookOpenCheck size={16} /> 독서퀴즈</p><h1>{quiz.title}</h1><p>{quiz.author} · {quiz.grade} · {quiz.questions.length}문제</p></header>
       <main className="quiz-main"><div className="quiz-progress"><span>{currentIndex + 1} / {quiz.questions.length}</span><div><i style={{ width: `${((currentIndex + 1) / quiz.questions.length) * 100}%` }} /></div></div>
-        <article className={`question-card single ${isRevealed ? (isCorrect ? 'correct' : 'wrong') : ''}`}><div className="question-number">문제 {String(currentIndex + 1).padStart(2, '0')}</div><h2>{question.question}</h2>{!isRevealed && <><button className="hint-button" onClick={() => setHints((prev) => ({ ...prev, [currentIndex]: !prev[currentIndex] }))}><Lightbulb size={17} /> {hints[currentIndex] ? '힌트 숨기기' : '힌트 보기'}</button>{hints[currentIndex] && <div className="hint-box"><Lightbulb size={18} /><span>{question.hint}</span></div>}</>}<div className="options-list">{question.options.map((option, optionIndex) => <button key={`${option}-${optionIndex}`} className={`${answers[currentIndex] === optionIndex ? 'selected' : ''} ${isRevealed && optionIndex === question.answer ? 'correct-option' : ''} ${isRevealed && answers[currentIndex] === optionIndex && optionIndex !== question.answer ? 'wrong-option' : ''}`} onClick={() => chooseAnswer(optionIndex)} disabled={isRevealed}><span>{optionIndex + 1}</span>{option}</button>)}</div>{isRevealed && <div className="answer-feedback">{isCorrect ? <CheckCircle2 size={19} /> : <XCircle size={19} />}<div><strong>{isCorrect ? '정답이에요!' : `아쉬워요. 정답은 ${question.answer + 1}번, “${question.options[question.answer]}”이에요.`}</strong><p>{question.explanation || question.evidence}</p></div></div>}</article>
-        <div className="question-navigation"><button className="secondary" disabled={currentIndex === 0} onClick={() => setCurrentIndex((value) => value - 1)}><ChevronLeft size={17} /> 이전</button>{!submitted && isLast ? <button className="primary" disabled={!isRevealed} onClick={submitQuiz}>결과 보기</button> : <button className="primary" disabled={isLast || (!submitted && !isRevealed)} onClick={() => setCurrentIndex((value) => value + 1)}>다음 <ChevronRight size={17} /></button>}</div>
+        <article className={`question-card single ${submitted && !openEnded ? (isCorrect ? 'correct' : 'wrong') : ''}`}>
+          <div className="question-number">문제 {String(currentIndex + 1).padStart(2, '0')}{openEnded ? ' · 생각 쓰기' : ''}</div><h2>{question.question}</h2>
+          {!submitted && question.hint && <><button className="hint-button" onClick={() => setHints((prev) => ({ ...prev, [currentIndex]: !prev[currentIndex] }))}><Lightbulb size={17} /> {hints[currentIndex] ? '힌트 숨기기' : '힌트 보기'}</button>{hints[currentIndex] && <div className="hint-box"><Lightbulb size={18} /><span>{question.hint}</span></div>}</>}
+          {openEnded ? <div className="open-answer-wrap"><textarea className="open-answer-input" value={answers[currentIndex] || ''} onChange={(e) => chooseAnswer(e.target.value)} disabled={submitted} placeholder="내 생각을 한두 문장으로 써 보세요." /><small>정답이 하나로 정해진 문제가 아니에요. 느낀 점이나 내 경험을 자유롭게 써 보세요.</small></div> : <div className="options-list">{question.options.map((option, optionIndex) => <button key={`${option}-${optionIndex}`} className={`${answers[currentIndex] === optionIndex ? 'selected' : ''} ${submitted && optionIndex === question.answer ? 'correct-option' : ''} ${submitted && answers[currentIndex] === optionIndex && optionIndex !== question.answer ? 'wrong-option' : ''}`} onClick={() => chooseAnswer(optionIndex)} disabled={submitted}><span>{optionIndex + 1}</span>{option}</button>)}</div>}
+          {submitted && !openEnded && <div className={`answer-feedback ${isCorrect ? 'correct' : 'wrong'}`}><div><strong>{isCorrect ? '정답이에요!' : `정답은 ${question.answer + 1}번, “${question.options[question.answer]}”이에요.`}</strong><p>{question.explanation || question.evidence}</p></div></div>}
+          {submitted && openEnded && <div className="answer-feedback reflection"><div><strong>내가 쓴 생각</strong><p>{answers[currentIndex] || '작성한 답이 없습니다.'}</p></div></div>}
+        </article>
+        <div className="question-navigation"><button className="secondary" disabled={currentIndex === 0} onClick={() => setCurrentIndex((value) => value - 1)}><ChevronLeft size={17} /> 이전</button>{!submitted && isLast ? <button className="primary" disabled={!hasAnswer} onClick={submitQuiz}>마지막에 채점하기</button> : <button className="primary" disabled={isLast || (!submitted && !hasAnswer)} onClick={() => setCurrentIndex((value) => value + 1)}>다음 <ChevronRight size={17} /></button>}</div>
         {submitted && <button className="result-return-button" onClick={() => setScreen('result')}>결과 화면으로 돌아가기</button>}
       </main>
     </div>;
@@ -234,14 +249,11 @@ function QuizPage({ onBack }) {
           <label><span>출판사</span><input value={form.publisher} onChange={(e) => setForm({ ...form, publisher: e.target.value })} placeholder="예: 창비" /></label>
           <label><span>학년</span><select value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })}>{GRADES.map((grade) => <option key={grade}>{grade}</option>)}</select></label>
         </div>
-
         <details className="optional-photo-panel"><summary>표지 사진으로 책 정보 불러오기 <span>선택사항</span></summary><div className={`cover-photo-card ${coverPhoto ? 'has-photo' : ''}`}><div className="cover-photo-heading"><div><strong>앞표지 사진</strong><span>사진을 읽어 제목·글쓴이·출판사를 입력칸에 채웁니다.</span></div><label className="photo-add-button"><Camera size={18} /> {photoLoading ? '준비 중…' : coverPhoto ? '다시 촬영' : '앞표지 촬영'}<input type="file" accept="image/*" capture="environment" disabled={photoLoading} onChange={handleCoverPhoto} /></label></div>{coverPhoto ? <><div className="cover-preview"><img src={coverPhoto.dataUrl} alt="책 앞표지" /><button type="button" aria-label="앞표지 사진 삭제" onClick={() => setCoverPhoto(null)}><X size={16} /></button><span>앞표지</span></div><button type="button" className="secondary identify-cover-button" onClick={identifyFromCover} disabled={identifying}>{identifying ? <><LoaderCircle className="spin" size={17} /> 읽는 중…</> : '사진에서 책 정보 채우기'}</button></> : <div className="cover-photo-guide"><Camera size={28} /><p>사진은 선택사항입니다. 읽어 온 정보는 직접 확인하고 수정할 수 있어요.</p></div>}</div></details>
-
         <div className="photo-source support-photo-card"><div className="photo-source-heading"><div><strong>내용 참고 사진</strong><span>선택사항 · 최대 {MAX_SUPPORT_PHOTOS}장</span></div><label className={`photo-add-button ${supportPhotos.length >= MAX_SUPPORT_PHOTOS ? 'disabled' : ''}`}><Camera size={18} /> {photoLoading ? '준비 중…' : '추가 촬영'}<input type="file" accept="image/*" capture="environment" multiple disabled={photoLoading || supportPhotos.length >= MAX_SUPPORT_PHOTOS} onChange={handleSupportPhotos} /></label></div><p>뒷표지 책 소개, 목차 또는 중요한 본문을 찍으면 내용 문제의 정확도가 높아집니다.</p>{supportPhotos.length > 0 && <div className="photo-preview-list">{supportPhotos.map((photo, index) => <div className="photo-preview" key={`${photo.name}-${index}`}><img src={photo.dataUrl} alt={`내용 참고 사진 ${index + 1}`} /><button type="button" aria-label={`추가 사진 ${index + 1} 삭제`} onClick={() => setSupportPhotos((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={15} /></button><span>{index + 1}</span></div>)}</div>}<small>사진은 퀴즈 생성에만 사용하며 퀴즈 기록에는 저장하지 않습니다.</small></div>
-
-        <fieldset><legend>문제 수</legend><div className="count-options">{COUNTS.map((count) => <button type="button" className={form.count === count ? 'active' : ''} key={count} onClick={() => setForm({ ...form, count })}>{count}문제</button>)}</div></fieldset>
+        <fieldset><legend>문제 수</legend><div className="count-options">{COUNTS.map((count) => <button type="button" className={form.count === count ? 'active' : ''} key={count} onClick={() => setForm({ ...form, count })}>{count}문제{count === 10 ? ' · 마지막 서술형' : ''}</button>)}</div></fieldset>
         <button className="primary generate-button" onClick={generateQuiz} disabled={loading || photoLoading || !form.title.trim()}>{loading ? <><LoaderCircle className="spin" size={18} /> 문제 만드는 중…</> : <><BookOpenCheck size={18} /> 퀴즈 만들기</>}</button>
-        {error && <p className="quiz-error">{error}</p>}<p className="quiz-caution">책 제목은 필수이며, 나머지 정보와 사진은 정확도를 높이는 선택사항입니다.</p>
+        {error && <p className="quiz-error">{error}</p>}<p className="quiz-caution">정답은 문제마다 공개하지 않고 마지막에 한꺼번에 채점합니다. 10문제는 객관식 9개와 생각 쓰기 1개로 구성됩니다.</p>
       </section>
     </main>
   </div>;
