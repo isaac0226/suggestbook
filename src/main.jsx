@@ -5,6 +5,7 @@ import './styles.css';
 import './quiz-extra.css';
 import './quiz-feedback.css';
 import './quiz-book-input.css';
+import './maintenance-lock.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
