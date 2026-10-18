@@ -43,6 +43,7 @@ async function run(t, { count = 5, kimiFailure, searchFailure, proFailure, built
     if (url === 'https://api.moonshot.ai/v1/chat/completions') {
       calls.kimi.push(body); calls.order.push(body.tools ? 'kimi-builtin' : 'kimi-chat');
       if (body.tools) {
+        assert.equal(body.thinking.type, 'disabled');
         assert.equal(body.tool_choice, body.messages.some((message) => message.role === 'tool') ? 'auto' : 'required');
         if (builtinFailure) return response({ error: { message: 'builtin search unavailable' } }, 503);
         if (!body.messages.some((message) => message.role === 'tool')) return response({ choices: [{ message: { role: 'assistant', content: '', reasoning_content: 'searching', tool_calls: [{ id: 'search-1', type: 'function', function: { name: '$web_search', arguments: '{"query":"테스트 동화"}' } }] } }] });
@@ -52,6 +53,7 @@ async function run(t, { count = 5, kimiFailure, searchFailure, proFailure, built
       }
       if (body.temperature !== undefined) return response({ error: { message: 'invalid temperature' } }, 400);
       if (kimiFailure) return response({ error: { message: kimiFailure.message } }, kimiFailure.status);
+      if (Array.isArray(body.messages[1].content) && body.messages[1].content[0].text.includes('퀴즈는 아직 만들지')) return response({ choices: [{ message: { content: JSON.stringify({ text: insufficientEvidence ? '' : '친구가 어려움에 처해 있어서 도와주었어요. 도움을 받은 친구도 다른 친구를 도와주며 함께 어려움을 해결했어요.' }) } }] });
       const data = action === 'identify' ? { title: '테스트 동화', author: '테스트 작가', publisher: '테스트 출판사', confidence: 1 }
         : insufficientEvidence ? { insufficientEvidence: true, questions: [] } : quiz(count);
       return response({ choices: [{ message: { content: JSON.stringify(data) } }] });
@@ -104,12 +106,13 @@ test('cover recognition sends the image to Kimi first without Gemini', async (t)
   assert.equal(result.calls.kimi[0].messages[1].content[1].image_url.url, photo);
 });
 
-test('support photos are read during generation in one Kimi call', async (t) => {
+test('support photos are read and used as concrete quiz evidence by Kimi without Gemini', async (t) => {
   const result = await run(t, { supportPhotos: true, hasGemini: false });
   assert.equal(result.statusCode, 200);
-  assert.deepEqual(result.calls.order, ['kimi-chat']);
+  assert.deepEqual(result.calls.order, ['kimi-chat', 'kimi-chat']);
   assert.equal(result.calls.kimi[0].messages[1].content[1].image_url.url, photo);
-  assert.equal(result.body.referenceProvider, 'photos');
+  assert.equal(result.body.referenceProvider, 'kimi_photos');
+  assert.match(result.calls.kimi[1].messages[1].content, /사진에서 읽은 본문: 친구가 어려움/);
 });
 
 test('an already identified cover is not redundantly read or used as story evidence', async (t) => {
