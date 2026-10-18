@@ -186,6 +186,7 @@ async function searchBookKimiBuiltin(context, book) {
         model: context.kimiModel, messages, max_tokens: 10000,
         ...(context.kimiModel === 'kimi-k2.6' ? { thinking: { type: 'enabled' } } : {}),
         tools: [{ type: 'builtin_function', function: { name: '$web_search' } }],
+        tool_choice: searched ? 'auto' : 'required',
       }),
       signal: AbortSignal.timeout(90000),
     });
@@ -201,7 +202,10 @@ async function searchBookKimiBuiltin(context, book) {
       }
       continue;
     }
-    if (!searched) throw new Error('BOOK_REFERENCE_UNAVAILABLE');
+    if (!searched) {
+      console.warn('Kimi search returned no tool call', { finishReason: data.choices?.[0]?.finish_reason, contentLength: message?.content?.length || 0 });
+      throw new Error('BOOK_REFERENCE_UNAVAILABLE');
+    }
     const result = extractJson(message?.content);
     const sources = (Array.isArray(result.sources) ? result.sources : []).filter((source) => /^https?:\/\//i.test(source.url || '')).map(({ title, url }) => ({ title: String(title || ''), url }));
     const facts = (Array.isArray(result.facts) ? result.facts : []).map(String).filter((fact) => fact && !FORBIDDEN_META.test(fact));

@@ -43,6 +43,7 @@ async function run(t, { count = 5, kimiFailure, searchFailure, proFailure, built
     if (url === 'https://api.moonshot.ai/v1/chat/completions') {
       calls.kimi.push(body); calls.order.push(body.tools ? 'kimi-builtin' : 'kimi-chat');
       if (body.tools) {
+        assert.equal(body.tool_choice, body.messages.some((message) => message.role === 'tool') ? 'auto' : 'required');
         if (builtinFailure) return response({ error: { message: 'builtin search unavailable' } }, 503);
         if (!body.messages.some((message) => message.role === 'tool')) return response({ choices: [{ message: { role: 'assistant', content: '', reasoning_content: 'searching', tool_calls: [{ id: 'search-1', type: 'function', function: { name: '$web_search', arguments: '{"query":"테스트 동화"}' } }] } }] });
         assert.equal(body.messages.at(-1).content, '{"query":"테스트 동화"}');
