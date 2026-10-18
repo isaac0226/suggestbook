@@ -11,7 +11,7 @@ const quiz = (count) => ({ title: '테스트 동화', author: '테스트 작가'
 })) });
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
 
-async function run(t, { count = 5, kimiFailure, searchFailure, proFailure, geminiFailure, malformedGemini = false,
+async function run(t, { count = 5, kimiFailure, searchFailure, proFailure, builtinFailure, geminiFailure, malformedGemini = false,
   emptyReference = false, insufficientEvidence = false, hasKimi = true, hasGemini = true,
   supportPhotos = false, coverOnly = false, action = 'generate' } = {}) {
   const calls = { kimi: [], search: [], gemini: [], order: [] };
@@ -41,7 +41,14 @@ async function run(t, { count = 5, kimiFailure, searchFailure, proFailure, gemin
       }] });
     }
     if (url === 'https://api.moonshot.ai/v1/chat/completions') {
-      calls.kimi.push(body); calls.order.push('kimi-chat');
+      calls.kimi.push(body); calls.order.push(body.tools ? 'kimi-builtin' : 'kimi-chat');
+      if (body.tools) {
+        if (builtinFailure) return response({ error: { message: 'builtin search unavailable' } }, 503);
+        if (!body.messages.some((message) => message.role === 'tool')) return response({ choices: [{ message: { role: 'assistant', content: '', reasoning_content: 'searching', tool_calls: [{ id: 'search-1', type: 'function', function: { name: '$web_search', arguments: '{"query":"테스트 동화"}' } }] } }] });
+        assert.equal(body.messages.at(-1).content, '{"query":"테스트 동화"}');
+        assert.equal(body.messages.at(-2).reasoning_content, 'searching');
+        return response({ choices: [{ message: { content: JSON.stringify({ summary: '친구가 어려워서 도와주었어요.', facts: ['도움을 받은 친구도 다른 친구를 도와주었어요.'], sources: [{ title: '테스트 동화 소개', url: 'https://example.com/book' }] }) } }] });
+      }
       if (body.temperature !== undefined) return response({ error: { message: 'invalid temperature' } }, 400);
       if (kimiFailure) return response({ error: { message: kimiFailure.message } }, kimiFailure.status);
       const data = action === 'identify' ? { title: '테스트 동화', author: '테스트 작가', publisher: '테스트 출판사', confidence: 1 }
@@ -119,11 +126,11 @@ test('Gemini generates only after a Kimi generation failure', async (t) => {
 });
 
 test('Gemini search is only a backup when Kimi search fails', async (t) => {
-  const result = await run(t, { searchFailure: { status: 500, message: 'search unavailable' } });
+  const result = await run(t, { searchFailure: { status: 500, message: 'search unavailable' }, builtinFailure: true });
   assert.equal(result.statusCode, 200);
   assert.equal(result.body.provider, 'kimi');
   assert.equal(result.body.referenceProvider, 'gemini_fallback');
-  assert.deepEqual(result.calls.order, ['kimi-search', 'kimi-search', 'gemini', 'kimi-chat']);
+  assert.deepEqual(result.calls.order, ['kimi-search', 'kimi-search', 'kimi-builtin', 'gemini', 'kimi-chat']);
 });
 
 for (const [failure, status, code] of [
@@ -175,4 +182,13 @@ test('Kimi Basic search recovers a Pro outage before Gemini is tried', async (t)
   assert.equal(result.body.provider, 'kimi');
   assert.deepEqual(result.calls.order, ['kimi-search', 'kimi-search', 'kimi-chat']);
   assert.equal(result.calls.search[1].include_content, true);
+});
+
+
+test('Kimi built-in search keeps the whole flow on Kimi when both REST search gateways fail', async (t) => {
+  const result = await run(t, { searchFailure: { status: 502, message: 'upstream unavailable' }, geminiFailure: depleted });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.provider, 'kimi');
+  assert.equal(result.body.referenceProvider, 'kimi');
+  assert.deepEqual(result.calls.order, ['kimi-search', 'kimi-search', 'kimi-builtin', 'kimi-builtin', 'kimi-chat']);
 });
