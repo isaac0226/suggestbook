@@ -11,7 +11,7 @@ const quiz = (count) => ({ title: '테스트 동화', author: '테스트 작가'
 })) });
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
 
-async function run(t, { count = 5, kimiFailure, searchFailure, geminiFailure, malformedGemini = false,
+async function run(t, { count = 5, kimiFailure, searchFailure, proFailure, geminiFailure, malformedGemini = false,
   emptyReference = false, insufficientEvidence = false, hasKimi = true, hasGemini = true,
   supportPhotos = false, coverOnly = false, action = 'generate' } = {}) {
   const calls = { kimi: [], search: [], gemini: [], order: [] };
@@ -30,8 +30,9 @@ async function run(t, { count = 5, kimiFailure, searchFailure, geminiFailure, ma
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     if (url.startsWith('https://www.googleapis.com/books/')) return response({ items: [] });
     const body = JSON.parse(options.body);
-    if (url === 'https://api.moonshot.ai/v1/tools/search_pro') {
+    if (url === 'https://api.moonshot.ai/v1/tools/search_pro' || url === 'https://api.moonshot.ai/v1/tools/search') {
       calls.search.push(body); calls.order.push('kimi-search');
+      if (proFailure && url.endsWith('/search_pro')) return response({}, 502);
       if (searchFailure) return response({ error: { message: searchFailure.message } }, searchFailure.status);
       return response({ search_results: emptyReference ? [] : [{
         title: '테스트 동화 — 책 소개', url: 'https://example.com/book',
@@ -122,7 +123,7 @@ test('Gemini search is only a backup when Kimi search fails', async (t) => {
   assert.equal(result.statusCode, 200);
   assert.equal(result.body.provider, 'kimi');
   assert.equal(result.body.referenceProvider, 'gemini_fallback');
-  assert.deepEqual(result.calls.order, ['kimi-search', 'gemini', 'kimi-chat']);
+  assert.deepEqual(result.calls.order, ['kimi-search', 'kimi-search', 'gemini', 'kimi-chat']);
 });
 
 for (const [failure, status, code] of [
@@ -165,4 +166,13 @@ test('malformed backup JSON is retried with a distinct format error', async (t) 
   assert.equal(result.statusCode, 502);
   assert.equal(result.body.code, 'AI_INVALID_RESPONSE');
   assert.equal(result.calls.gemini.filter((body) => !body.tools).length, 3);
+});
+
+
+test('Kimi Basic search recovers a Pro outage before Gemini is tried', async (t) => {
+  const result = await run(t, { proFailure: true, geminiFailure: depleted });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.provider, 'kimi');
+  assert.deepEqual(result.calls.order, ['kimi-search', 'kimi-search', 'kimi-chat']);
+  assert.equal(result.calls.search[1].include_content, true);
 });

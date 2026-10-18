@@ -171,22 +171,30 @@ async function googleBooks(title, people, publisher) {
 }
 
 async function searchBookKimi(apiKey, book) {
-  const response = await fetch('https://api.moonshot.ai/v1/tools/search_pro', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      text_query: [book.title, book.people, book.publisher, '책 줄거리 등장인물 이야기 내용'].filter(Boolean).join(' '),
-      limit: 5, timeout_seconds: 25,
-    }),
-    signal: AbortSignal.timeout(30000),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw apiError('Kimi', response, data);
+  const query = [book.title, book.people, book.publisher, '책 줄거리 등장인물 이야기 내용'].filter(Boolean).join(' ');
+  let data;
+  for (const endpoint of ['search_pro', 'search']) {
+    const response = await fetch(`https://api.moonshot.ai/v1/tools/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        text_query: query, limit: 5, timeout_seconds: 25,
+        ...(endpoint === 'search' ? { include_content: true } : {}),
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+    data = await response.json().catch(() => ({}));
+    if (response.ok) break;
+    // A transient Pro outage should still use Kimi's Basic search before the
+    // optional Gemini backup. Never retry authentication or billing failures.
+    if (endpoint === 'search_pro' && (response.status >= 500 || response.status === 404)) continue;
+    throw apiError('Kimi', response, data);
+  }
   const normalize = (text) => String(text || '').normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
   const title = normalize(book.title);
   const sources = (Array.isArray(data.search_results) ? data.search_results : []).map((item) => ({
     title: String(item.title || ''), url: String(item.url || ''),
-    text: [item.snippet, ...(Array.isArray(item.chunks) ? item.chunks.map((chunk) => chunk.text) : [])].filter((text) => typeof text === 'string').join('\n').slice(0, 4500),
+    text: [item.snippet, item.text, item.content, ...(Array.isArray(item.chunks) ? item.chunks.map((chunk) => chunk.text) : [])].filter((text) => typeof text === 'string').join('\n').slice(0, 4500),
   })).filter((item) => /^https?:\/\//i.test(item.url) && item.text.trim().length >= 40 && normalize(item.title + item.text).includes(title)).slice(0, 5);
   if (!sources.length) throw new Error('BOOK_REFERENCE_UNAVAILABLE');
   return {
