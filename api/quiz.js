@@ -146,7 +146,7 @@ function geminiText(result) {
   return result?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
 }
 
-async function callKimi({ apiKey, model, prompt, maxTokens, temperature = 0.05 }) {
+async function callKimi({ apiKey, model, prompt, maxTokens }) {
   const response = await fetch('https://api.moonshot.ai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -162,7 +162,7 @@ async function callKimi({ apiKey, model, prompt, maxTokens, temperature = 0.05 }
         },
         { role: 'user', content: prompt },
       ],
-      temperature,
+      // Let Kimi use its supported model default, including on retries.
       max_tokens: maxTokens,
       response_format: { type: 'json_object' },
     }),
@@ -330,7 +330,7 @@ async function generateWithKimi({ apiKey, model, prompt, questionCount }) {
       const attemptPrompt = attempt === 0
         ? prompt
         : `${prompt}\n\n이전 응답의 형식 또는 문제 품질이 올바르지 않았습니다. 문제 수, 4개 선택지, answer 숫자, evidence를 다시 확인하고 JSON 객체만 출력하세요.`;
-      const text = await callKimi({ apiKey, model, prompt: attemptPrompt, maxTokens, temperature: attempt === 0 ? 0.05 : 0 });
+      const text = await callKimi({ apiKey, model, prompt: attemptPrompt, maxTokens });
       return validateQuiz(extractJson(text), questionCount);
     } catch (error) {
       lastError = error;

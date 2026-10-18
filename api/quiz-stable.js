@@ -4,6 +4,31 @@ const FORBIDDEN_META = /(수상|상\s*이름|어떤\s*상|기법|제작\s*기법
 
 function send(res, status, payload) { res.status(status).json(payload); }
 
+function apiError(provider, response, result) {
+  const error = new Error(result?.error?.message || `${provider} API 오류 (${response.status})`);
+  error.provider = provider;
+  error.status = response.status;
+  return error;
+}
+
+function providerFailure(error) {
+  const message = error.message || '';
+  const provider = error.provider || 'AI';
+  if (/prepayment credits.*depleted|insufficient.*(?:balance|credit)|recharge|billing|payment required/i.test(message) || error.status === 402) {
+    return { status: 402, code: 'AI_BILLING_REQUIRED', message: `${provider} API의 결제 잔액이 부족합니다. 관리자 계정에서 충전·결제 상태를 확인해 주세요.` };
+  }
+  if (error.status === 429 || /quota|rate.?limit|resource_exhausted|max RPM/i.test(message)) {
+    return { status: 429, code: 'AI_RATE_LIMITED', message: `${provider} API의 사용 한도에 도달했습니다. 잠시 기다렸다가 다시 시도해 주세요.` };
+  }
+  if ([401, 403].includes(error.status) || /invalid.*api.?key|unauthorized|suspended/i.test(message)) {
+    return { status: 503, code: 'AI_AUTH_ERROR', message: `${provider} API 인증에 실패했습니다. 관리자 계정에서 API 키와 이용 상태를 확인해 주세요.` };
+  }
+  if (error.status === 400 || /invalid temperature/i.test(message)) {
+    return { status: 502, code: 'AI_REQUEST_ERROR', message: `${provider} 모델의 요청 설정이 맞지 않습니다. 관리자 확인이 필요합니다.` };
+  }
+  return null;
+}
+
 function extractJson(text) {
   const cleaned = String(text || '').replace(/```json|```/gi, '').trim();
   if (!cleaned) throw new Error('AI_EMPTY_RESPONSE');
@@ -40,7 +65,7 @@ async function callGemini({ apiKey, model, prompt, images = [], maxOutputTokens 
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result?.error?.message || `Gemini API 오류 (${response.status})`);
+  if (!response.ok) throw apiError('Gemini', response, result);
   return result;
 }
 
@@ -52,6 +77,8 @@ async function geminiJsonWithRetry(args, retries = 2) {
       return extractJson(geminiText(result));
     } catch (error) {
       lastError = error;
+      // Billing, authentication and request errors cannot be repaired by JSON retries.
+      if (providerFailure(error)) throw error;
       console.warn('Gemini JSON retry', index + 1, error.message);
     }
   }
@@ -68,13 +95,13 @@ async function callKimi({ apiKey, model, prompt, maxTokens }) {
         { role: 'system', content: '당신은 초등학교 독서 퀴즈 교사입니다. 단순 암기보다 이야기의 문맥 이해를 우선합니다. 사건의 앞뒤 관계, 원인과 결과, 인물의 행동 이유, 상황에 따른 마음, 사건끼리의 연결을 묻는 문제를 많이 만듭니다. 학년 수준은 가능한 한 맞추되, 근거가 분명한 좋은 문맥 이해 문제라면 조금 어려워도 출제합니다. 단, 자료에 없는 내용은 추측하지 않습니다. 10문제일 때 마지막 문제는 정답이 없는 생각 쓰기 문제로 만듭니다. 수상 경력, 출판 정보, 그림 제작 기법, 작가 경력은 문제로 만들지 않습니다. 제공된 자료만 사용하고 유효한 JSON 객체 하나만 출력하세요.' },
         { role: 'user', content: prompt },
       ],
-      temperature: 0.05,
+      // Use the model default: Kimi K2.5 thinking only accepts temperature 1.
       max_tokens: maxTokens,
       response_format: { type: 'json_object' },
     }),
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result?.error?.message || `Kimi API 오류 (${response.status})`);
+  if (!response.ok) throw apiError('Kimi', response, result);
   return result?.choices?.[0]?.message?.content || '';
 }
 
@@ -220,6 +247,8 @@ export default async function handler(req, res) {
       return send(res, 200, await identifyCover(geminiKey, geminiModel, safeImages[0], title, author));
     } catch (error) {
       console.error('cover identification error', error);
+      const failure = providerFailure(error);
+      if (failure) return send(res, failure.status, { code: failure.code, message: failure.message });
       return send(res, 502, { message: '표지에서 책 정보를 읽지 못했습니다. 직접 입력해 주세요.' });
     }
   }
@@ -285,9 +314,9 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('stable quiz generation error', error);
     const message = error.message || '퀴즈 생성 중 오류가 발생했습니다.';
-    if (/insufficient balance|suspended|recharge/i.test(message)) return send(res, 402, { message: 'Kimi 결제 잔액 또는 API 키가 아직 활성화되지 않았습니다. Moonshot 결제 계정과 API 키의 조직이 같은지 확인해 주세요.' });
-    if (/quota|rate limit|resource_exhausted/i.test(message)) return send(res, 429, { message: 'API 사용 한도를 확인해 주세요.' });
-    if (/AI_EMPTY_RESPONSE|AI_JSON_NOT_FOUND|JSON/.test(message)) return send(res, 502, { message: 'AI가 올바른 형식으로 응답하지 않았습니다. 자동 재시도 후에도 실패했습니다.' });
-    return send(res, 500, { message: '문제 형식을 만들지 못했습니다. 다시 한 번 눌러 주세요.' });
+    const failure = providerFailure(error);
+    if (failure) return send(res, failure.status, { code: failure.code, message: failure.message });
+    if (error instanceof SyntaxError || /AI_EMPTY_RESPONSE|AI_JSON_NOT_FOUND|JSON|형식|문제 수/.test(message)) return send(res, 502, { code: 'AI_INVALID_RESPONSE', message: 'AI가 올바른 문제 형식으로 응답하지 않았습니다. 다시 시도해 주세요.' });
+    return send(res, 502, { code: 'AI_UNAVAILABLE', message: '퀴즈 생성 서비스에 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 }
