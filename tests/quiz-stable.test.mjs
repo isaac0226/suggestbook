@@ -9,7 +9,7 @@ const quiz = (count) => ({ title: '테스트 동화', author: '테스트 작가'
 })) });
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
 
-async function run(t, { count = 5, kimiFailure, geminiFailure, malformed = false, action = 'generate' } = {}) {
+async function run(t, { count = 5, kimiFailure, geminiFailure, malformed = false, emptyReference = false, action = 'generate' } = {}) {
   const calls = { kimi: [], gemini: [] };
   const original = { GEMINI_API_KEY: process.env.GEMINI_API_KEY, KIMI_API_KEY: process.env.KIMI_API_KEY };
   process.env.GEMINI_API_KEY = 'test-gemini-key';
@@ -22,6 +22,7 @@ async function run(t, { count = 5, kimiFailure, geminiFailure, malformed = false
   t.mock.method(console, 'warn', () => {});
   t.mock.method(console, 'error', () => {});
   t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (emptyReference && url.startsWith('https://www.googleapis.com/books/')) return response({ items: [] });
     if (url.startsWith('https://www.googleapis.com/books/')) return response({ items: [{ volumeInfo: {
       title: '테스트 동화', authors: ['테스트 작가'], description: '친구가 어려움에 처해 있어서 도와주었어요.',
     } }] });
@@ -38,7 +39,7 @@ async function run(t, { count = 5, kimiFailure, geminiFailure, malformed = false
     assert.ok(url.startsWith('https://generativelanguage.googleapis.com/'));
     calls.gemini.push(body);
     if (geminiFailure) return response({ error: { message: geminiFailure.message } }, geminiFailure.status);
-    const content = body.tools ? { summary: '친구를 도와주는 이야기', facts: ['친구가 어려워서 도와줬다.'], confidence: 1 } : quiz(count);
+    const content = body.tools ? (emptyReference ? {} : { summary: '친구를 도와주는 이야기', facts: ['친구가 어려워서 도와줬다.'], confidence: 1 }) : quiz(count);
     return response({ candidates: [{ content: { parts: [{ text: malformed && !body.tools ? 'invalid JSON' : JSON.stringify(content) }] } }] });
   });
   const res = { status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; } };
@@ -99,4 +100,18 @@ test('malformed JSON is retried and remains distinct from provider failures', as
   assert.equal(result.statusCode, 502);
   assert.equal(result.body.code, 'AI_INVALID_RESPONSE');
   assert.equal(result.calls.gemini.filter((body) => !body.tools).length, 3);
+});
+
+test('a failed research request cannot produce an invented quiz from just the title', async (t) => {
+  const result = await run(t, { emptyReference: true, geminiFailure: depleted });
+  assert.equal(result.statusCode, 402);
+  assert.equal(result.body.code, 'AI_BILLING_REQUIRED');
+  assert.equal(result.calls.kimi.length, 0);
+});
+
+test('an unknown book asks for source photos instead of inventing story evidence', async (t) => {
+  const result = await run(t, { emptyReference: true });
+  assert.equal(result.statusCode, 422);
+  assert.equal(result.body.code, 'BOOK_REFERENCE_UNAVAILABLE');
+  assert.equal(result.calls.kimi.length, 0);
 });

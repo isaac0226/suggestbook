@@ -165,7 +165,7 @@ async function researchBook(apiKey, model, book) {
     return { summary: String(data.summary || ''), facts, confidence: Number(data.confidence || 0) };
   } catch (error) {
     console.warn('book research skipped', error.message);
-    return { summary: '', facts: [], confidence: 0 };
+    return { summary: '', facts: [], confidence: 0, error };
   }
 }
 
@@ -286,6 +286,11 @@ export default async function handler(req, res) {
     const supportImages = safeImages.filter((_, index) => imageRoles[index] !== 'front_cover');
     const [research, photoFacts] = await Promise.all([researchBook(geminiKey, geminiModel, book), extractPhotoFacts(geminiKey, geminiModel, supportImages)]);
     const facts = [...research.facts, ...photoFacts].filter((fact) => fact && !FORBIDDEN_META.test(fact));
+    // A title and author alone are not evidence for plot questions. When research
+    // is unavailable, retain any catalog/photo evidence but never invent a story.
+    if (!book.description.trim() && !research.summary.trim() && !facts.length) {
+      throw research.error || new Error('BOOK_REFERENCE_UNAVAILABLE');
+    }
     const reference = [
       `제목: ${book.title}`,
       book.people ? `글·그림·옮긴이: ${book.people}` : '',
@@ -321,6 +326,7 @@ export default async function handler(req, res) {
     const message = error.message || '퀴즈 생성 중 오류가 발생했습니다.';
     const failure = providerFailure(error);
     if (failure) return send(res, failure.status, { code: failure.code, message: failure.message });
+    if (message === 'BOOK_REFERENCE_UNAVAILABLE') return send(res, 422, { code: message, message: '책의 이야기 내용을 확인하지 못했습니다. 제목·저자를 확인하고 뒷표지 책 소개나 본문 사진을 추가해 주세요.' });
     if (error instanceof SyntaxError || /AI_EMPTY_RESPONSE|AI_JSON_NOT_FOUND|JSON|형식|문제 수/.test(message)) return send(res, 502, { code: 'AI_INVALID_RESPONSE', message: 'AI가 올바른 문제 형식으로 응답하지 않았습니다. 다시 시도해 주세요.' });
     return send(res, 502, { code: 'AI_UNAVAILABLE', message: '퀴즈 생성 서비스에 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' });
   }
