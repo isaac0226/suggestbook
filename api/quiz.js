@@ -107,7 +107,7 @@ function geminiModel() {
 }
 
 function kimiModel() {
-  return process.env.KIMI_MODEL || 'kimi-k2.5';
+  return process.env.KIMI_MODEL || 'kimi-k2.6';
 }
 
 function parseImage(dataUrl) {
@@ -163,6 +163,7 @@ async function callKimi({ apiKey, model, prompt, maxTokens }) {
         { role: 'user', content: prompt },
       ],
       // Let Kimi use its supported model default, including on retries.
+      ...(model === 'kimi-k2.6' ? { thinking: { type: 'disabled' } } : {}),
       max_tokens: maxTokens,
       response_format: { type: 'json_object' },
     }),

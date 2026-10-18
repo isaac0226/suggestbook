@@ -76,6 +76,7 @@ for (const [failure, expectedStatus, expectedCode] of [
   [{ status: 401, message: 'API key not valid' }, 503, 'AI_AUTH_ERROR'],
   [{ status: 429, message: 'RESOURCE_EXHAUSTED quota' }, 429, 'AI_RATE_LIMITED'],
   [{ status: 400, message: 'invalid request argument' }, 502, 'AI_REQUEST_ERROR'],
+  [{ status: 404, message: 'Not found the model or Permission denied' }, 503, 'AI_MODEL_UNAVAILABLE'],
 ]) {
   test(`${expectedCode} is reported accurately without repeated provider requests`, async (t) => {
     const result = await run(t, { kimiFailure: { status: 500, message: 'temporarily unavailable' }, geminiFailure: failure });

@@ -20,6 +20,9 @@ function providerFailure(error) {
   if (error.status === 429 || /quota|rate.?limit|resource_exhausted|max RPM/i.test(message)) {
     return { status: 429, code: 'AI_RATE_LIMITED', message: `${provider} API의 사용 한도에 도달했습니다. 잠시 기다렸다가 다시 시도해 주세요.` };
   }
+  if (error.status === 404 || /not found the model/i.test(message)) {
+    return { status: 503, code: 'AI_MODEL_UNAVAILABLE', message: `${provider}에서 설정된 모델을 사용할 수 없습니다. 관리자 계정에서 모델 설정과 이용 권한을 확인해 주세요.` };
+  }
   if ([401, 403].includes(error.status) || /invalid.*api.?key|unauthorized|suspended/i.test(message)) {
     return { status: 503, code: 'AI_AUTH_ERROR', message: `${provider} API 인증에 실패했습니다. 관리자 계정에서 API 키와 이용 상태를 확인해 주세요.` };
   }
@@ -95,7 +98,9 @@ async function callKimi({ apiKey, model, prompt, maxTokens }) {
         { role: 'system', content: '당신은 초등학교 독서 퀴즈 교사입니다. 단순 암기보다 이야기의 문맥 이해를 우선합니다. 사건의 앞뒤 관계, 원인과 결과, 인물의 행동 이유, 상황에 따른 마음, 사건끼리의 연결을 묻는 문제를 많이 만듭니다. 학년 수준은 가능한 한 맞추되, 근거가 분명한 좋은 문맥 이해 문제라면 조금 어려워도 출제합니다. 단, 자료에 없는 내용은 추측하지 않습니다. 10문제일 때 마지막 문제는 정답이 없는 생각 쓰기 문제로 만듭니다. 수상 경력, 출판 정보, 그림 제작 기법, 작가 경력은 문제로 만들지 않습니다. 제공된 자료만 사용하고 유효한 JSON 객체 하나만 출력하세요.' },
         { role: 'user', content: prompt },
       ],
-      // Use the model default: Kimi K2.5 thinking only accepts temperature 1.
+      // Use the model's supported sampling defaults. Instant mode leaves the
+      // output budget for quiz JSON rather than internal reasoning.
+      ...(model === 'kimi-k2.6' ? { thinking: { type: 'disabled' } } : {}),
       max_tokens: maxTokens,
       response_format: { type: 'json_object' },
     }),
@@ -232,7 +237,7 @@ export default async function handler(req, res) {
   const geminiKey = process.env.GEMINI_API_KEY;
   const kimiKey = process.env.KIMI_API_KEY;
   const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
-  const kimiModel = process.env.KIMI_MODEL || 'kimi-k2.5';
+  const kimiModel = process.env.KIMI_MODEL || 'kimi-k2.6';
 
   if (req.method === 'GET') return send(res, 200, { ok: true, geminiConfigured: Boolean(geminiKey), kimiConfigured: Boolean(kimiKey), geminiModel, kimiModel });
   if (req.method !== 'POST') return send(res, 405, { message: 'POST 요청만 사용할 수 있습니다.' });
