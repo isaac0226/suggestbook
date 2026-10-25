@@ -11,7 +11,7 @@ const quiz = (count) => ({ title: '테스트 동화', author: '테스트 작가'
 })) });
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
 
-async function run(t, { count = 5, kimiFailure, searchFailure, proFailure, catalogFallback = false, catalogAuthor = '테스트 작가', geminiFailure, malformedGemini = false,
+async function run(t, { count = 5, kimiFailure, kimiMalformedOnce = false, extraQuestion = false, author = '테스트 작가', searchFailure, proFailure, catalogFallback = false, catalogAuthor = '테스트 작가', geminiFailure, malformedGemini = false,
   emptyReference = false, insufficientEvidence = false, hasKimi = true, hasGemini = true,
   supportPhotos = false, coverOnly = false, action = 'generate' } = {}) {
   const calls = { kimi: [], search: [], catalog: [], gemini: [], order: [] };
@@ -55,7 +55,8 @@ async function run(t, { count = 5, kimiFailure, searchFailure, proFailure, catal
       if (kimiFailure) return response({ error: { message: kimiFailure.message } }, kimiFailure.status);
       if (Array.isArray(body.messages[1].content) && body.messages[1].content[0].text.includes('퀴즈는 아직 만들지')) return response({ choices: [{ message: { content: JSON.stringify({ text: insufficientEvidence ? '' : '친구가 어려움에 처해 있어서 도와주었어요. 도움을 받은 친구도 다른 친구를 도와주며 함께 어려움을 해결했어요.' }) } }] });
       const data = action === 'identify' ? { title: '테스트 동화', author: '테스트 작가', publisher: '테스트 출판사', confidence: 1 }
-        : insufficientEvidence ? { insufficientEvidence: true, questions: [] } : quiz(count);
+        : insufficientEvidence ? { insufficientEvidence: true, questions: [] } : quiz(count + (extraQuestion ? 1 : 0));
+      if (kimiMalformedOnce && calls.kimi.length === 1) return response({ choices: [{ message: { content: '{"questions":[' } }] });
       return response({ choices: [{ message: { content: JSON.stringify(data) } }] });
     }
     assert.ok(url.startsWith('https://generativelanguage.googleapis.com/'));
@@ -68,7 +69,7 @@ async function run(t, { count = 5, kimiFailure, searchFailure, proFailure, catal
   const images = action === 'identify' || supportPhotos || coverOnly ? [photo] : [];
   const imageRoles = coverOnly ? ['front_cover'] : images.map(() => 'support');
   const res = { status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; } };
-  await handler({ method: 'POST', body: { action, title: '테스트 동화', author: '테스트 작가', grade: '초등 1학년', count, images, imageRoles } }, res);
+  await handler({ method: 'POST', body: { action, title: '테스트 동화', author, grade: '초등 1학년', count, images, imageRoles } }, res);
   return { ...res, calls };
 }
 
@@ -205,4 +206,24 @@ test('public book fallback rejects the same title with a different author', asyn
   assert.equal(result.statusCode, 422);
   assert.equal(result.calls.kimi.length, 0);
   assert.equal(result.calls.catalog.length, 1);
+});
+
+test('malformed Kimi quiz JSON is retried on Kimi before Gemini is used', async (t) => {
+  const result = await run(t, { emptyReference: true, catalogFallback: true, kimiMalformedOnce: true });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.provider, 'kimi');
+  assert.equal(result.calls.gemini.length, 0);
+  assert.equal(result.calls.kimi.length, 2);
+});
+
+test('an extra generated question is trimmed instead of failing the quiz', async (t) => {
+  const result = await run(t, { count: 5, extraQuestion: true, hasGemini: false });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.questions.length, 5);
+});
+
+test('public book fallback matches authors written with role words', async (t) => {
+  const result = await run(t, { emptyReference: true, catalogFallback: true, author: '테스트 작가 글, 다른 화가 그림', hasGemini: false });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.referenceProvider, 'public_catalog');
 });
