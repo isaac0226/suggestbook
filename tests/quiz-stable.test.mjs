@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import handler from '../api/quiz-stable.js';
+import handler, { fixTitleTypos } from '../api/quiz-stable.js';
 
 const depleted = { status: 402, message: 'Your prepayment credits are depleted. Please manage billing.' };
 const rateLimit = { status: 429, message: 'organization max RPM: 3' };
@@ -226,4 +226,12 @@ test('public book fallback matches authors written with role words', async (t) =
   const result = await run(t, { emptyReference: true, catalogFallback: true, author: '테스트 작가 글, 다른 화가 그림', hasGemini: false });
   assert.equal(result.statusCode, 200);
   assert.equal(result.body.referenceProvider, 'public_catalog');
+});
+
+test('one-syllable title typos are corrected without touching real story words', () => {
+  const data = { questions: [{ question: '괜물빵은 어떻게 되었나요?', options: ['괴물이 웃었어요', '괴물빵을 먹었어요', '괴물방에 갔어요', '괴물밥을 먹었어요'], hint: '', explanation: '괜물빵 이야기', evidence: '' }] };
+  const fixed = fixTitleTypos(data, '괴물빵', '괴물이 웃었어요. 괴물방에 갔어요.');
+  assert.equal(fixed.questions[0].question, '괴물빵은 어떻게 되었나요?');
+  assert.equal(fixed.questions[0].explanation, '괴물빵 이야기');
+  assert.deepEqual(fixed.questions[0].options, ['괴물이 웃었어요', '괴물빵을 먹었어요', '괴물방에 갔어요', '괴물밥을 먹었어요']);
 });
