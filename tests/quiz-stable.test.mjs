@@ -235,3 +235,10 @@ test('one-syllable title typos are corrected without touching real story words',
   assert.equal(fixed.questions[0].explanation, '괴물빵 이야기');
   assert.deepEqual(fixed.questions[0].options, ['괴물이 웃었어요', '괴물빵을 먹었어요', '괴물방에 갔어요', '괴물밥을 먹었어요']);
 });
+
+test('broken or stray characters inside the title are repaired', () => {
+  const data = { questions: [{ question: '괴?물빵은 왜 화가 났나요?', options: ['괴�물빵', '�물빵', '괴물​빵', '괴물빵?'], hint: '', explanation: '', evidence: '' }] };
+  const fixed = fixTitleTypos(data, '괴물빵', '');
+  assert.equal(fixed.questions[0].question, '괴물빵은 왜 화가 났나요?');
+  assert.deepEqual(fixed.questions[0].options, ['괴물빵', '괴물빵', '괴물빵', '괴물빵?']);
+});

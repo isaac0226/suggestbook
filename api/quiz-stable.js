@@ -298,13 +298,28 @@ const initialConsonant = (char) => {
   return code >= 0 && code < 11172 ? Math.floor(code / 588) : -1;
 };
 
-// Models occasionally misspell one syllable of a Korean title (괴물빵 → 괜물빵).
-// Replace such near-copies when the variant never appears in the source material.
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Models occasionally misspell one syllable of a Korean title (괴물빵 → 괜물빵) or emit
+// a broken character inside a rare syllable (괴�물빵). Repair the title, then drop any
+// leftover broken or invisible characters; other near-copies are fixed only when the
+// variant never appears in the source material.
 export function fixTitleTypos(data, title, reference = '') {
   const target = String(title || '').replace(/\s/g, '');
-  if ([...target].length < 3 || !/^[\uac00-\ud7a3]+$/.test(target)) return data;
-  const fix = (text) => {
-    if (typeof text !== 'string') return text;
+  const chars = [...target];
+  const brokenTitle = target ? new RegExp([
+    // A syllable garbled into broken characters: 괴�물빵, �물빵
+    ...chars.map((char, i) => `${escapeRegExp(chars.slice(0, i).join(''))}[\\uFFFD${escapeRegExp(char)}]*\\uFFFD[\\uFFFD${escapeRegExp(char)}]*${escapeRegExp(chars.slice(i + 1).join(''))}`),
+    // Stray marks inserted between title syllables: 괴?물빵
+    ...chars.slice(1).map((_, i) => `${escapeRegExp(chars.slice(0, i + 1).join(''))}[?\\uFFFD]+${escapeRegExp(chars.slice(i + 1).join(''))}`),
+  ].join('|'), 'g') : null;
+  const fixOneSyllable = [...target].length >= 3 && /^[\uac00-\ud7a3]+$/.test(target);
+  const fix = (raw) => {
+    if (typeof raw !== 'string') return raw;
+    let text = raw.normalize('NFC');
+    if (brokenTitle) text = text.replace(brokenTitle, target);
+    text = text.replace(/[\uFFFD\u200B-\u200D\u2060\uFEFF\u00AD]/g, '');
+    if (!fixOneSyllable) return text;
     let out = '';
     for (let i = 0; i < text.length; i += 1) {
       const part = text.slice(i, i + target.length);
