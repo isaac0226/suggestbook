@@ -120,7 +120,7 @@ function QuizPage({ onBack }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'identify', images: [coverPhoto.dataUrl], title: form.title, author: form.author }),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || '표지 정보를 읽지 못했어요.');
       setForm((prev) => ({ ...prev, title: data.title || prev.title, author: data.author || prev.author, publisher: data.publisher || prev.publisher }));
     } catch (err) {
@@ -156,8 +156,10 @@ function QuizPage({ onBack }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, images, imageRoles }),
       });
-      const data = await response.json();
+      // A function timeout returns a plain-text page, not JSON.
+      const data = await response.json().catch(() => ({ message: response.status === 504 ? '퀴즈를 만드는 데 시간이 너무 오래 걸렸어요. 문제 수를 줄이거나 다시 시도해 주세요.' : '' }));
       if (!response.ok) throw new Error(data.message || '퀴즈 생성에 실패했어요.');
+      if (!Array.isArray(data.questions) || !data.questions.length) throw new Error('퀴즈 문제를 받지 못했어요. 다시 시도해 주세요.');
       setQuiz(data);
       setScreen('quiz');
       window.scrollTo({ top: 0, behavior: 'smooth' });
